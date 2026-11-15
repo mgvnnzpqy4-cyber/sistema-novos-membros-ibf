@@ -296,9 +296,11 @@
     };
 
     const isLessonAttended = (cand, lessonId) => {
-      if (!cand?.attendance) return false;
+      if (!cand?.attendance) return true; // Todo mundo começa presente/100%
       const val = cand.attendance[lessonId];
-      return val === true || val === 'justificado';
+      if (val === false) return false; // Faltou explicitamente
+      if (val === 'justificado') return true; // Justificado conta como presença/abono
+      return true; // Presente ou não marcado ainda conta como 100% até registrar falta
     };
 
     const addMinutesToTime = (timeStr, minutesToAdd = 30) => {
@@ -2356,11 +2358,11 @@
                         {candidates.map(cand => {
                           const name = getCandidateName(cand);
                           const attStatus = cand.attendance?.[lesson.id];
-                          let statusLabel = 'Ausente';
-                          let statusColor = 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200';
-                          if (attStatus === true) {
-                            statusLabel = 'Presente';
-                            statusColor = 'bg-orange-600 text-white';
+                          let statusLabel = 'Presente';
+                          let statusColor = 'bg-orange-600 text-white';
+                          if (attStatus === false) {
+                            statusLabel = 'Ausente';
+                            statusColor = 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200';
                           } else if (attStatus === 'justificado') {
                             statusLabel = 'Justificado';
                             statusColor = 'bg-amber-100 text-amber-800 hover:bg-amber-200';
@@ -2369,8 +2371,9 @@
                           const handleCycleAttendance = async () => {
                             const attendance = cand.attendance || {};
                             let nextVal;
-                            if (attStatus === true) nextVal = 'justificado';
-                            else if (attStatus === 'justificado') nextVal = false;
+                            // Ciclo: Presente (true/undefined) -> Ausente (false) -> Justificado ('justificado') -> Presente (true)
+                            if (attStatus === true || attStatus === undefined) nextVal = false;
+                            else if (attStatus === false) nextVal = 'justificado';
                             else nextVal = true;
 
                             const updatedAttendance = { ...attendance, [lesson.id]: nextVal };
@@ -5544,6 +5547,7 @@
       const [newQType, setNewQType] = useState('text');
       const [newQRequired, setNewQRequired] = useState(true);
       const [newQOptions, setNewQOptions] = useState('');
+      const [isConditionalEnabled, setIsConditionalEnabled] = useState(false);
       const [newQConditionParentId, setNewQConditionParentId] = useState('');
       const [newQConditionValue, setNewQConditionValue] = useState('');
       const [draggedIndex, setDraggedIndex] = useState(null);
@@ -5561,14 +5565,15 @@
           options: opts,
           isCore: false,
           order: questions.length,
-          conditionParentId: newQConditionParentId || null,
-          conditionValue: newQConditionValue || null
+          conditionParentId: isConditionalEnabled && newQConditionParentId ? newQConditionParentId : null,
+          conditionValue: isConditionalEnabled && newQConditionValue ? newQConditionValue : null
         });
         setNewQLabel('');
         setNewQOptions('');
+        setIsConditionalEnabled(false);
         setNewQConditionParentId('');
         setNewQConditionValue('');
-        showToast('Pergunta de inscrição condicionada adicionada!');
+        showToast('Pergunta de inscrição adicionada com sucesso!');
       };
 
       const handleSaveEditedQuestion = async (e) => {
@@ -5578,8 +5583,8 @@
         await saveQuestion({
           ...editingQuestion,
           options: opts,
-          conditionParentId: editingQuestion.conditionParentId || null,
-          conditionValue: editingQuestion.conditionValue || null
+          conditionParentId: editingQuestion.isConditionalEnabled && editingQuestion.conditionParentId ? editingQuestion.conditionParentId : null,
+          conditionValue: editingQuestion.isConditionalEnabled && editingQuestion.conditionValue ? editingQuestion.conditionValue : null
         });
         setEditingQuestion(null);
         showToast('Pergunta de inscrição atualizada com sucesso!');
@@ -5616,12 +5621,12 @@
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-5 bg-zinc-50 border border-zinc-200 rounded-2xl p-5 h-fit space-y-4">
             <h3 className="font-bold text-sm uppercase text-zinc-900">
-              Nova Pergunta (Com Condição opcional)
+              Nova Pergunta
             </h3>
             <form onSubmit={handleAddRegistrationQuestion} className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-zinc-600 mb-1">Título da Pergunta</label>
-                <input type="text" required value={newQLabel} onChange={(e) => setNewQLabel(e.target.value)} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                <input type="text" required value={newQLabel} onChange={(e) => setNewQLabel(e.target.value)} placeholder="Ex: Qual o seu ministério anterior?" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -5651,27 +5656,49 @@
                 </div>
               )}
 
-              <div className="pt-2 border-t border-zinc-200 space-y-3">
-                <span className="font-bold text-xs uppercase text-zinc-700 block">Condição de Exibição (Opcional)</span>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                  <select value={newQConditionParentId} onChange={(e) => setNewQConditionParentId(e.target.value)} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold">
-                    <option value="">Sempre visível (Sem condição)</option>
-                    {questions.filter(q => q.type === 'select').map(q => (
-                      <option key={q.id} value={q.id}>{q.label}</option>
-                    ))}
-                  </select>
+              {/* Toggle Switch para Pergunta Condicional */}
+              <div className="pt-3 border-t border-zinc-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-zinc-900 block">Pergunta Condicional</span>
+                    <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsConditionalEnabled(!isConditionalEnabled)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
 
-                {newQConditionParentId && (
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                    <input type="text" value={newQConditionValue} onChange={(e) => setNewQConditionValue(e.target.value)} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                {isConditionalEnabled && (
+                  <div className="p-3 bg-white rounded-xl border border-zinc-200 space-y-3 shadow-2xs">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
+                      <select value={newQConditionParentId} onChange={(e) => setNewQConditionParentId(e.target.value)} className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
+                        <option value="">Selecione a pergunta base...</option>
+                        {questions.filter(q => q.type === 'select').map(q => (
+                          <option key={q.id} value={q.id}>{q.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
+                      <input type="text" value={newQConditionValue} onChange={(e) => setNewQConditionValue(e.target.value)} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                    </div>
                   </div>
                 )}
               </div>
 
-              <button type="submit" className="w-full py-2.5 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer">
+              <button type="submit" className="w-full py-2.5 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer shadow-sm">
                 Adicionar Pergunta
               </button>
             </form>
@@ -5699,7 +5726,7 @@
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button type="button" onClick={() => setEditingQuestion({ ...q, options: q.options ? q.options.join(', ') : '' })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar pergunta">
+                  <button type="button" onClick={() => setEditingQuestion({ ...q, options: q.options ? q.options.join(', ') : '', isConditionalEnabled: !!q.conditionParentId })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar pergunta">
                     <Icon name="edit-2" className="w-4 h-4" />
                   </button>
                   {!q.isCore && (
@@ -5756,22 +5783,43 @@
                     </div>
                   )}
 
-                  <div className="pt-2 border-t border-zinc-200 space-y-3">
-                    <span className="font-bold text-xs uppercase text-zinc-700 block">Condição de Exibição (Opcional)</span>
-                    <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                      <select value={editingQuestion.conditionParentId || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, conditionParentId: e.target.value }))} className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold">
-                        <option value="">Sempre visível (Sem condição)</option>
-                        {questions.filter(q => q.type === 'select' && q.id !== editingQuestion.id).map(q => (
-                          <option key={q.id} value={q.id}>{q.label}</option>
-                        ))}
-                      </select>
+                  <div className="pt-3 border-t border-zinc-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-xs text-zinc-900 block">Pergunta Condicional</span>
+                        <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingQuestion(prev => ({ ...prev, isConditionalEnabled: !prev.isConditionalEnabled }))}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          editingQuestion.isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            editingQuestion.isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </div>
 
-                    {editingQuestion.conditionParentId && (
-                      <div>
-                        <label className="block text-xs font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                        <input type="text" value={editingQuestion.conditionValue || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, conditionValue: e.target.value }))} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                    {editingQuestion.isConditionalEnabled && (
+                      <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
+                          <select value={editingQuestion.conditionParentId || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, conditionParentId: e.target.value }))} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
+                            <option value="">Selecione a pergunta base...</option>
+                            {questions.filter(q => q.type === 'select' && q.id !== editingQuestion.id).map(q => (
+                              <option key={q.id} value={q.id}>{q.label}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
+                          <input type="text" value={editingQuestion.conditionValue || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, conditionValue: e.target.value }))} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -5798,6 +5846,7 @@
       const [newIQType, setNewIQType] = useState('textarea');
       const [newIQRequired, setNewIQRequired] = useState(true);
       const [newIQOptions, setNewIQOptions] = useState('');
+      const [isConditionalEnabled, setIsConditionalEnabled] = useState(false);
       const [newIQConditionParentId, setNewIQConditionParentId] = useState('');
       const [newIQConditionValue, setNewIQConditionValue] = useState('');
       const [draggedIndex, setDraggedIndex] = useState(null);
@@ -5814,11 +5863,12 @@
           required: newIQRequired,
           options: opts,
           order: interviewQuestions.length,
-          conditionParentId: newIQConditionParentId || null,
-          conditionValue: newIQConditionValue || null
+          conditionParentId: isConditionalEnabled && newIQConditionParentId ? newIQConditionParentId : null,
+          conditionValue: isConditionalEnabled && newIQConditionValue ? newIQConditionValue : null
         });
         setNewIQLabel('');
         setNewIQOptions('');
+        setIsConditionalEnabled(false);
         setNewIQConditionParentId('');
         setNewIQConditionValue('');
         showToast('Critério de entrevista adicionado!');
@@ -5831,8 +5881,8 @@
         await saveInterviewQuestion({
           ...editingInterviewQuestion,
           options: opts,
-          conditionParentId: editingInterviewQuestion.conditionParentId || null,
-          conditionValue: editingInterviewQuestion.conditionValue || null
+          conditionParentId: editingInterviewQuestion.isConditionalEnabled && editingInterviewQuestion.conditionParentId ? editingInterviewQuestion.conditionParentId : null,
+          conditionValue: editingInterviewQuestion.isConditionalEnabled && editingInterviewQuestion.conditionValue ? editingInterviewQuestion.conditionValue : null
         });
         setEditingInterviewQuestion(null);
         showToast('Critério de entrevista atualizado com sucesso!');
@@ -5905,27 +5955,49 @@
                 </div>
               )}
 
-              <div className="pt-2 border-t border-zinc-200 space-y-3">
-                <span className="font-bold text-xs uppercase text-zinc-700 block">Condição de Exibição (Opcional)</span>
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                  <select value={newIQConditionParentId} onChange={(e) => setNewIQConditionParentId(e.target.value)} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold">
-                    <option value="">Sempre visível (Sem condição)</option>
-                    {interviewQuestions.filter(iq => iq.type === 'select').map(iq => (
-                      <option key={iq.id} value={iq.id}>{iq.label}</option>
-                    ))}
-                  </select>
+              {/* Toggle Switch para Critério Condicional de Entrevista */}
+              <div className="pt-3 border-t border-zinc-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-zinc-900 block">Critério Condicional</span>
+                    <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsConditionalEnabled(!isConditionalEnabled)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
 
-                {newIQConditionParentId && (
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                    <input type="text" value={newIQConditionValue} onChange={(e) => setNewIQConditionValue(e.target.value)} placeholder="Ex: Excelente" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                {isConditionalEnabled && (
+                  <div className="p-3 bg-white rounded-xl border border-zinc-200 space-y-3 shadow-2xs">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
+                      <select value={newIQConditionParentId} onChange={(e) => setNewIQConditionParentId(e.target.value)} className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
+                        <option value="">Selecione o critério base...</option>
+                        {interviewQuestions.filter(iq => iq.type === 'select').map(iq => (
+                          <option key={iq.id} value={iq.id}>{iq.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
+                      <input type="text" value={newIQConditionValue} onChange={(e) => setNewIQConditionValue(e.target.value)} placeholder="Ex: Excelente" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                    </div>
                   </div>
                 )}
               </div>
 
-              <button type="submit" className="w-full py-2.5 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer">
+              <button type="submit" className="w-full py-2.5 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer shadow-sm">
                 Adicionar Critério
               </button>
             </form>
@@ -5953,7 +6025,7 @@
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button type="button" onClick={() => setEditingInterviewQuestion({ ...iq, options: iq.options ? iq.options.join(', ') : '' })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar critério">
+                  <button type="button" onClick={() => setEditingInterviewQuestion({ ...iq, options: iq.options ? iq.options.join(', ') : '', isConditionalEnabled: !!iq.conditionParentId })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar critério">
                     <Icon name="edit-2" className="w-4 h-4" />
                   </button>
                   <button type="button" onClick={() => removeInterviewQuestion(iq.id)} className="p-1.5 text-zinc-400 hover:text-red-600 rounded-lg cursor-pointer shrink-0" title="Apagar critério">
@@ -6012,22 +6084,43 @@
                     </div>
                   )}
 
-                  <div className="pt-2 border-t border-zinc-200 space-y-3">
-                    <span className="font-bold text-xs uppercase text-zinc-700 block">Condição de Exibição (Opcional)</span>
-                    <div>
-                      <label className="block text-xs font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                      <select value={editingInterviewQuestion.conditionParentId || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, conditionParentId: e.target.value }))} className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold">
-                        <option value="">Sempre visível (Sem condição)</option>
-                        {interviewQuestions.filter(iq => iq.type === 'select' && iq.id !== editingInterviewQuestion.id).map(iq => (
-                          <option key={iq.id} value={iq.id}>{iq.label}</option>
-                        ))}
-                      </select>
+                  <div className="pt-3 border-t border-zinc-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-xs text-zinc-900 block">Critério Condicional</span>
+                        <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingInterviewQuestion(prev => ({ ...prev, isConditionalEnabled: !prev.isConditionalEnabled }))}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          editingInterviewQuestion.isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            editingInterviewQuestion.isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </div>
 
-                    {editingInterviewQuestion.conditionParentId && (
-                      <div>
-                        <label className="block text-xs font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                        <input type="text" value={editingInterviewQuestion.conditionValue || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, conditionValue: e.target.value }))} placeholder="Ex: Excelente" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                    {editingInterviewQuestion.isConditionalEnabled && (
+                      <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
+                          <select value={editingInterviewQuestion.conditionParentId || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, conditionParentId: e.target.value }))} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
+                            <option value="">Selecione o critério base...</option>
+                            {interviewQuestions.filter(iq => iq.type === 'select' && iq.id !== editingInterviewQuestion.id).map(iq => (
+                              <option key={iq.id} value={iq.id}>{iq.label}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
+                          <input type="text" value={editingInterviewQuestion.conditionValue || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, conditionValue: e.target.value }))} placeholder="Ex: Excelente" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -6044,709 +6137,6 @@
               </div>
             </div>
           )}
-        </div>
-      );
-    }
-
-    // --- GERENCIAMENTO DE USUÁRIOS ---
-    function AdminUsersTab({ users, saveUser, removeUser, showToast }) {
-      const [username, setUsername] = useState('');
-      const [password, setPassword] = useState('');
-      const [name, setName] = useState('');
-      const [role, setRole] = useState('entrevistador');
-
-      const handleCreateUser = async (e) => {
-        e.preventDefault();
-        if (!username.trim() || !password.trim() || !name.trim()) return;
-        const newId = `u-${Date.now()}`;
-        await saveUser({ id: newId, username: username.trim(), password, name: name.trim(), role });
-        setUsername('');
-        setPassword('');
-        setName('');
-        showToast('Usuário cadastrado com sucesso e salvo em nuvem!');
-      };
-
-      const handleDeleteUser = async (u) => {
-        const adminCount = users.filter(user => user.role === 'admin').length;
-        if (u.role === 'admin' && adminCount <= 1) {
-          showToast('Não é possível apagar o único administrador restante do sistema.', 'error');
-          return;
-        }
-        await removeUser(u.id);
-        showToast('Usuário apagado com sucesso da nuvem!');
-      };
-
-      return (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-5 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4 h-fit">
-            <h3 className="font-bold text-sm uppercase text-zinc-900">Novo Usuário do Sistema</h3>
-            <form onSubmit={handleCreateUser} className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome Completo</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Pr. João Silva"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome de Usuário (Login)</label>
-                <input
-                  type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="joao.silva"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Senha</label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Perfil de Acesso</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                >
-                  <option value="admin">Administrador</option>
-                  <option value="organizador">Organizador</option>
-                  <option value="curso">Equipe de Curso</option>
-                  <option value="entrevistador">Entrevistador</option>
-                  <option value="integracao">Equipe de Integração</option>
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
-              >
-                Cadastrar Usuário
-              </button>
-            </form>
-          </div>
-
-          <div className="lg:col-span-7 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <h3 className="font-bold text-sm uppercase text-zinc-900">Usuários Cadastrados ({users.length})</h3>
-            <div className="space-y-3">
-              {users.map(u => (
-                <div key={u.id} className="p-4 rounded-xl border border-zinc-200 bg-white flex items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-zinc-950">{u.name}</span>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${getRoleBadgeClass(u.role)}`}>
-                        {getRoleLabel(u.role)}
-                      </span>
-                    </div>
-                    <span className="text-xs text-zinc-500 block font-mono">Usuário: {u.username}</span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteUser(u)}
-                    className="p-2 text-zinc-400 hover:text-red-600 rounded-lg transition cursor-pointer"
-                    title="Apagar usuário"
-                  >
-                    <Icon name="trash-2" className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // --- RELATÓRIOS ---
-    function AdminReportsTab({ activeClass, candidates, interviewers, questions, interviewQuestions }) {
-      const [reportFilterType, setReportFilterType] = useState('todos');
-      const [reportFilterValue, setReportFilterValue] = useState('');
-      const [reportFormat, setReportFormat] = useState('detalhado'); // 'detalhado' ou 'aprovados_nomes'
-      const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-      const [aiSummaries, setAiSummaries] = useState({});
-      const [isGeneratingAiSummaries, setIsGeneratingAiSummaries] = useState(false);
-      const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('ibf_gemini_api_key') || '');
-      const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-
-      const approvedOnlyList = useMemo(() => {
-        return candidates.filter(c => (c.evaluation || '').startsWith('Aprovado'));
-      }, [candidates]);
-
-      const filteredReportCandidates = useMemo(() => {
-        if (reportFormat === 'aprovados_nomes') {
-          return approvedOnlyList;
-        }
-        return candidates.filter(c => {
-          if (!c.evaluation || c.evaluation === 'Aguardando Entrevista') return false;
-
-          if (reportFilterType === 'entrevistador') {
-            if (!reportFilterValue) return true;
-            return c.interviewerId === reportFilterValue;
-          }
-          if (reportFilterType === 'status') {
-            if (!reportFilterValue) return true;
-            if (reportFilterValue === 'aprovados') return (c.evaluation || '').startsWith('Aprovado');
-            if (reportFilterValue === 'reprovados') return (c.evaluation || '').startsWith('Reprovado');
-            return true;
-          }
-          if (reportFilterType === 'pendencias') {
-            const safeQuestions = questions || [];
-            if (reportFilterValue === 'batismo') {
-              return (c.evaluation || '').toLowerCase().includes('batismo') || Object.entries(c.answers || {}).some(([k, v]) => {
-                const qObj = safeQuestions.find(q => q.id === k);
-                const label = qObj ? qObj.label.toLowerCase() : k.toLowerCase();
-                const valStr = String(v || '').toLowerCase().trim();
-                if (label.includes('batismo')) {
-                  return valStr && (valStr.includes('não') || valStr.includes('nao') || valStr.includes('breve') || (valStr !== 'sim' && valStr !== ''));
-                }
-                return valStr && (valStr.includes('não') || valStr.includes('nao') || valStr.includes('breve'));
-              });
-            }
-            if (reportFilterValue === 'discipulado') return (c.evaluation || '').toLowerCase().includes('discipulado');
-            if (reportFilterValue === 'reagendar') return c.schedule?.status === 'Reagendar' || c.schedule?.status === 'Faltou';
-            return c.interviewStatus !== 'concluida';
-          }
-          return true;
-        });
-      }, [candidates, reportFilterType, reportFilterValue, questions, reportFormat, approvedOnlyList]);
-
-      // Chamada robusta à API do Gemini otimizada para Vercel e Web com retry exponencial e modelo correto (acionada exclusivamente por clique)
-      const generateTrueAiSummaries = async () => {
-        const apiKeyToUse = (customApiKey || "").trim() || "AQ.Ab8RN6LR1zCdByRATaFvJrWx6AQZgaudxWJ7B4cP6OGrhBIkUA";
-        setIsGeneratingAiSummaries(true);
-        const newSummaries = { ...aiSummaries };
-        const safeQuestions = questions || [];
-        const safeIntQuestions = interviewQuestions || [];
-
-        for (const c of filteredReportCandidates) {
-          const candidateName = getCandidateName(c);
-          const evaluation = c.evaluation || 'Pendente';
-          const notes = c.notes || 'Nenhuma observação';
-          
-          let answersText = '';
-          if (c.answers) {
-            Object.entries(c.answers).forEach(([k, v]) => {
-              const qObj = safeQuestions.find(q => q.id === k);
-              const label = qObj ? qObj.label : k;
-              if (v && typeof v === 'string' && !v.startsWith('data:image')) {
-                answersText += `- ${label}: ${v}\n`;
-              }
-            });
-          }
-
-          let intAnswersText = '';
-          if (c.interviewAnswers) {
-            Object.entries(c.interviewAnswers).forEach(([k, v]) => {
-              const iqObj = safeIntQuestions.find(iq => iq.id === k);
-              const label = iqObj ? iqObj.label : k;
-              if (v && typeof v === 'string') {
-                intAnswersText += `- ${label}: ${v}\n`;
-              }
-            });
-          }
-
-          const prompt = `Faça um resumo bem curto, objetivo e direto (em apenas 1 frase) avaliando o candidato ${candidateName} (status: "${evaluation}"), citando brevemente os pontos centrais de todas as respostas do formulário e da entrevista abaixo:
-Respostas do Formulário:
-${answersText}
-Respostas da Entrevista:
-${intAnswersText}
-Observações: ${notes}
-Resumo sintético objetivo:`;
-
-          let success = false;
-          let delay = 1000;
-
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKeyToUse}`;
-              const payload = {
-                contents: [{ parts: [{ text: prompt }] }],
-                systemInstruction: { parts: [{ text: "Você é um analista eclesiástico que resume fichas de novos membros de forma extremamente objetiva, curta e cobrindo todos os pontos." }] }
-              };
-
-              const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              });
-              const result = await response.json();
-              const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) {
-                newSummaries[c.id] = text.trim();
-                success = true;
-                break;
-              }
-            } catch (err) {
-              await new Promise(res => setTimeout(res, delay));
-              delay *= 2;
-            }
-          }
-
-          if (!success) {
-            newSummaries[c.id] = `Candidato com parecer "${evaluation}". Apresentou testemunho coerente e bom alinhamento com a visão da igreja.`;
-          }
-        }
-
-        setAiSummaries(newSummaries);
-        setIsGeneratingAiSummaries(false);
-      };
-
-      const getAiSummary = (c) => {
-        if (aiSummaries[c.id]) return aiSummaries[c.id];
-        const evalText = c.evaluation || 'Pendente';
-        const notes = c.notes ? ` ${c.notes}.` : '';
-        return `Aprovado com parecer "${evalText}". Demonstrou alinhamento com a visão e princípios da igreja.${notes}`;
-      };
-
-      const handleDownloadPdf = () => {
-        setIsGeneratingPdf(true);
-        try {
-          const fileName = reportFormat === 'aprovados_nomes' 
-            ? `Lista_Aprovados_Apenas_Nomes_${(activeClass?.name || 'Novos_Membros').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
-            : `Relatorio_Consolidado_${(activeClass?.name || 'Novos_Membros').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
-          
-          if (window.jspdf && window.jspdf.jsPDF) {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(14);
-            doc.setTextColor(24, 24, 27);
-            doc.text('IGREJA BATISTA FILADELFIA', 14, 16);
-
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(11);
-            doc.setTextColor(63, 63, 70);
-            const reportTitleText = reportFormat === 'aprovados_nomes' ? 'Lista de Membros Aprovados' : 'Relatório Consolidado de Inscrições e Entrevistas';
-            doc.text(reportTitleText, 14, 22.5);
-
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            doc.setTextColor(113, 113, 122);
-            doc.text(`Turma: ${activeClass?.name || 'Turma Ativa'}`, 14, 28.5);
-            doc.text(`Emitido em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, 14, 33.5);
-
-            doc.setDrawColor(228, 228, 231);
-            doc.setLineWidth(0.3);
-            doc.line(14, 37, pageWidth - 14, 37);
-
-            if (reportFormat === 'aprovados_nomes') {
-              const tableRows = approvedOnlyList.map((c, index) => {
-                const name = getCandidateName(c);
-                const evalType = c.evaluation || 'Aprovado';
-                return [`${index + 1}. ${name}`, evalType];
-              });
-
-              doc.autoTable({
-                startY: 42,
-                margin: { left: 14, right: 14, bottom: 18 },
-                head: [['CANDIDATO', 'PARECER']],
-                body: tableRows.length > 0 ? tableRows : [['Nenhum candidato aprovado encontrado.', '-']],
-                theme: 'plain',
-                styles: {
-                  font: 'helvetica',
-                  fontSize: 9,
-                  cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
-                  textColor: [39, 39, 42],
-                  lineColor: [228, 228, 231],
-                  lineWidth: { bottom: 0.25 },
-                  valign: 'middle'
-                },
-                headStyles: {
-                  fillColor: [244, 244, 245],
-                  textColor: [24, 24, 27],
-                  fontStyle: 'bold',
-                  fontSize: 8.5
-                },
-                alternateRowStyles: {
-                  fillColor: [250, 250, 250]
-                },
-                didDrawPage: function (data) {
-                  const pageNumber = doc.internal.getNumberOfPages();
-                  doc.setDrawColor(228, 228, 231);
-                  doc.setLineWidth(0.25);
-                  doc.line(14, pageHeight - 13, pageWidth - 14, pageHeight - 13);
-
-                  doc.setFont('helvetica', 'normal');
-                  doc.setFontSize(7.5);
-                  doc.setTextColor(113, 113, 122);
-                  doc.text('Igreja Batista Filadélfia - Sistema de Gestão de Novos Membros', 14, pageHeight - 8);
-                  doc.text(`Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
-                }
-              });
-            } else {
-              const totalCount = filteredReportCandidates.length;
-              const approvedCount = filteredReportCandidates.filter(c => (c.evaluation || '').startsWith('Aprovado')).length;
-              const reprovedCount = filteredReportCandidates.filter(c => (c.evaluation || '').startsWith('Reprovado')).length;
-
-              const cardY = 41;
-              const cardW = (pageWidth - 28 - 6) / 3;
-              const cardH = 14;
-
-              const kpiCards = [
-                { label: 'TOTAL FILTRADO', value: String(totalCount) },
-                { label: 'APROVADOS', value: String(approvedCount) },
-                { label: 'REPROVADOS', value: String(reprovedCount) }
-              ];
-
-              kpiCards.forEach((card, i) => {
-                const x = 14 + i * (cardW + 3);
-                doc.setFillColor(248, 250, 252);
-                doc.setDrawColor(226, 232, 240);
-                doc.setLineWidth(0.3);
-                doc.roundedRect(x, cardY, cardW, cardH, 1.5, 1.5, 'FD');
-
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(6.5);
-                doc.setTextColor(100, 116, 139);
-                doc.text(card.label, x + 4, cardY + 4.5);
-
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(11);
-                doc.setTextColor(15, 23, 42);
-                doc.text(card.value, x + 4, cardY + 11);
-              });
-
-              const tableRows = filteredReportCandidates.map((c, index) => {
-                const name = `${index + 1}. ${getCandidateName(c)}`;
-                const intName = interviewers.find(i => i.id === c.interviewerId)?.name || 'Não atribuído';
-                const summary = getAiSummary(c);
-                const status = c.evaluation || 'Pendente';
-                return [name, summary, intName, status];
-              });
-
-              doc.autoTable({
-                startY: 59,
-                margin: { left: 14, right: 14, bottom: 18 },
-                head: [['CANDIDATO', 'RESUMO SINTÉTICO (IA)', 'ENTREVISTADOR', 'PARECER / STATUS']],
-                body: tableRows.length > 0 ? tableRows : [['Nenhum registro encontrado para o filtro selecionado.', '', '', '']],
-                theme: 'plain',
-                styles: {
-                  font: 'helvetica',
-                  fontSize: 8.5,
-                  cellPadding: { top: 4, right: 3.5, bottom: 4, left: 3.5 },
-                  textColor: [39, 39, 42],
-                  lineColor: [228, 228, 231],
-                  lineWidth: { bottom: 0.25 },
-                  valign: 'middle'
-                },
-                headStyles: {
-                  fillColor: [244, 244, 245],
-                  textColor: [24, 24, 27],
-                  fontStyle: 'bold',
-                  fontSize: 7.5,
-                  cellPadding: { top: 3.5, right: 3.5, bottom: 3.5, left: 3.5 }
-                },
-                alternateRowStyles: {
-                  fillColor: [250, 250, 250]
-                },
-                columnStyles: {
-                  0: { cellWidth: 40, fontStyle: 'bold', textColor: [9, 9, 11] },
-                  1: { cellWidth: 65, fontSize: 8, textColor: [63, 63, 70] },
-                  2: { cellWidth: 42, fontSize: 8, textColor: [63, 63, 70] },
-                  3: { cellWidth: 35, fontStyle: 'bold' }
-                },
-                didParseCell: function (data) {
-                  if (data.section === 'body' && data.column.index === 3) {
-                    const val = String(data.cell.raw || '');
-                    if (val.includes('Discipulado') || val.includes('Batismo')) {
-                      data.cell.styles.textColor = [7, 89, 133];
-                    } else if (val.startsWith('Aprovado')) {
-                      data.cell.styles.textColor = [6, 95, 70];
-                    } else if (val.startsWith('Reprovado')) {
-                      data.cell.styles.textColor = [153, 27, 27];
-                    }
-                  }
-                },
-                didDrawPage: function (data) {
-                  const pageNumber = doc.internal.getNumberOfPages();
-                  doc.setDrawColor(228, 228, 231);
-                  doc.setLineWidth(0.25);
-                  doc.line(14, pageHeight - 13, pageWidth - 14, pageHeight - 13);
-
-                  doc.setFont('helvetica', 'normal');
-                  doc.setFontSize(7.5);
-                  doc.setTextColor(113, 113, 122);
-                  doc.text(`Total: ${filteredReportCandidates.length} Registro${filteredReportCandidates.length === 1 ? '' : 's'}`, 14, pageHeight - 8);
-                  doc.text('Igreja Batista Filadélfia - Sistema de Gestão de Novos Membros', pageWidth / 2, pageHeight - 8, { align: 'center' });
-                  doc.text(`Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
-                }
-              });
-            }
-
-            doc.save(fileName);
-          } else {
-            window.print();
-          }
-        } catch (err) {
-          console.error('Erro ao gerar PDF:', err);
-          window.print();
-        } finally {
-          setIsGeneratingPdf(false);
-        }
-      };
-
-      return (
-        <div className="space-y-6">
-          <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4 no-print">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="font-bold text-base text-zinc-950">Relatórios e Exportação em PDF</h3>
-                <p className="text-xs text-zinc-500">
-                  {isGeneratingAiSummaries ? 'Gerando resumos sintéticos reais via IA (Gemini)...' : 'Resumos gerados por IA com base nas respostas dos candidatos.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                  className={`px-3.5 py-2.5 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
-                    customApiKey ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-900 border border-amber-300 animate-pulse'
-                  }`}
-                  title="Configurar Chave da API do Gemini para Vercel"
-                >
-                  <Icon name="key" className="w-4 h-4" />
-                  <span>{customApiKey ? 'API Key Configurada' : '⚠️ Clique para Configurar API Key'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadPdf}
-                  disabled={isGeneratingPdf || isGeneratingAiSummaries}
-                  className="px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
-                >
-                  <Icon name="file-text" className="w-4 h-4" />
-                  <span>{isGeneratingPdf ? 'Gerando PDF...' : 'Baixar PDF'}</span>
-                </button>
-              </div>
-            </div>
-
-            {showApiKeyInput && (
-              <div className="p-4 bg-zinc-50 border border-zinc-300 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-zinc-900 uppercase">Chave de API do Google Gemini (Vercel)</span>
-                  <button type="button" onClick={() => setShowApiKeyInput(false)} className="text-xs text-zinc-500 hover:underline">Fechar</button>
-                </div>
-                <p className="text-xs text-zinc-600">
-                  Para que a IA gere os resumos no Vercel, insira sua chave de API do Gemini abaixo. Os resumos só serão gerados quando você clicar em "Salvar e Gerar Resumos".
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={customApiKey}
-                    onChange={(e) => {
-                      setCustomApiKey(e.target.value);
-                      localStorage.setItem('ibf_gemini_api_key', e.target.value);
-                    }}
-                    placeholder="Cole sua API Key aqui..."
-                    className="flex-1 px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      localStorage.setItem('ibf_gemini_api_key', customApiKey);
-                      setShowApiKeyInput(false);
-                      generateTrueAiSummaries();
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer"
-                  >
-                    Salvar e Gerar Resumos
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-zinc-200">
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 mb-1">Formato do Relatório</label>
-                <select
-                  value={reportFormat}
-                  onChange={(e) => setReportFormat(e.target.value)}
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                >
-                  <option value="detalhado">Relatório Consolidado Detalhado</option>
-                  <option value="aprovados_nomes">Lista de Aprovados (Apenas Nomes)</option>
-                </select>
-              </div>
-
-              {reportFormat === 'detalhado' && (
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Filtrar Relatório Por</label>
-                  <select
-                    value={reportFilterType}
-                    onChange={(e) => {
-                      setReportFilterType(e.target.value);
-                      setReportFilterValue('');
-                    }}
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                  >
-                    <option value="todos">Todos os Candidatos Entrevistados (Sem Filtro)</option>
-                    <option value="entrevistador">Por Entrevistador</option>
-                    <option value="status">Por Status</option>
-                    <option value="pendencias">Por Pendências</option>
-                  </select>
-                </div>
-              )}
-
-              {reportFormat === 'detalhado' && reportFilterType === 'entrevistador' && (
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Selecione o Entrevistador</label>
-                  <select
-                    value={reportFilterValue}
-                    onChange={(e) => setReportFilterValue(e.target.value)}
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                  >
-                    <option value="">Todos os Entrevistadores</option>
-                    {interviewers.map(int => (
-                      <option key={int.id} value={int.id}>{int.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {reportFormat === 'detalhado' && reportFilterType === 'status' && (
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Selecione o Status</label>
-                  <select
-                    value={reportFilterValue}
-                    onChange={(e) => setReportFilterValue(e.target.value)}
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                  >
-                    <option value="">Todos os Status</option>
-                    <option value="aprovados">Aprovados</option>
-                    <option value="reprovados">Reprovados</option>
-                  </select>
-                </div>
-              )}
-
-              {reportFormat === 'detalhado' && reportFilterType === 'pendencias' && (
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">Selecione o Tipo de Pendência</label>
-                  <select
-                    value={reportFilterValue}
-                    onChange={(e) => setReportFilterValue(e.target.value)}
-                    className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                  >
-                    <option value="">Todas as Pendências</option>
-                    <option value="batismo">Pendência de Batismo</option>
-                    <option value="discipulado">Pendência de Discipulado</option>
-                    <option value="reagendar">Reagendamento / Faltas</option>
-                  </select>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div id="printable-report" className="bg-white border border-zinc-200 rounded-2xl p-8 shadow-sm space-y-6">
-            <div className="border-b border-zinc-300 pb-4 flex items-center justify-between">
-              <div>
-                <h1 className="text-xl font-bold text-zinc-950">
-                  {reportFormat === 'aprovados_nomes' ? 'Lista de Membros Aprovados' : 'Relatório Consolidado de Inscrições e Entrevistas'}
-                </h1>
-                <p className="text-xs text-zinc-600 mt-0.5">Turma: {activeClass?.name} — Emitido em: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
-              </div>
-            </div>
-
-            {reportFormat === 'aprovados_nomes' ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-zinc-100 border-b border-zinc-300 font-bold uppercase tracking-wider text-zinc-700">
-                      <th className="p-3">Nome Completo</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-200">
-                    {approvedOnlyList.length === 0 ? (
-                      <tr>
-                        <td className="p-8 text-center text-zinc-500">Nenhum candidato aprovado encontrado.</td>
-                      </tr>
-                    ) : (
-                      approvedOnlyList.map((c, idx) => {
-                        const name = getCandidateName(c);
-                        return (
-                          <tr key={c.id} className="hover:bg-zinc-50">
-                            <td className="p-3 font-semibold text-zinc-950">{idx + 1}. {name}</td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-                  <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
-                    <span className="text-[10px] font-bold uppercase text-zinc-500 block">TOTAL FILTRADO</span>
-                    <span className="text-xl font-extrabold text-zinc-950">{filteredReportCandidates.length}</span>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-                    <span className="text-[10px] font-bold uppercase text-emerald-700 block">APROVADOS</span>
-                    <span className="text-xl font-extrabold text-emerald-800">{filteredReportCandidates.filter(c => (c.evaluation || '').startsWith('Aprovado')).length}</span>
-                  </div>
-                  <div className="p-3 bg-red-50 rounded-xl border border-red-200">
-                    <span className="text-[10px] font-bold uppercase text-red-700 block">REPROVADOS</span>
-                    <span className="text-xl font-extrabold text-red-800">{filteredReportCandidates.filter(c => (c.evaluation || '').startsWith('Reprovado')).length}</span>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-zinc-100 border-b border-zinc-300 font-bold uppercase tracking-wider text-zinc-700">
-                        <th className="p-3 w-1/4">Candidato</th>
-                        <th className="p-3 w-5/12">Resumo Sintético (IA)</th>
-                        <th className="p-3 w-1/6">Entrevistador</th>
-                        <th className="p-3 w-1/6">Parecer / Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-200">
-                      {filteredReportCandidates.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="p-8 text-center text-zinc-500">Nenhum registro encontrado para o filtro selecionado.</td>
-                        </tr>
-                      ) : (
-                        filteredReportCandidates.map((c, idx) => {
-                          const name = `${idx + 1}. ${getCandidateName(c)}`;
-                          const intName = interviewers.find(i => i.id === c.interviewerId)?.name || 'Não atribuído';
-                          const summary = getAiSummary(c);
-
-                          return (
-                            <tr key={c.id} className="align-top">
-                              <td className="p-3 font-semibold text-zinc-950">{name}</td>
-                              <td className="p-3 text-zinc-600 leading-relaxed">{summary}</td>
-                              <td className="p-3 text-zinc-700 font-medium">{intName}</td>
-                              <td className="p-3 font-semibold">
-                                <span className={getEvaluationBadgeClass(c.evaluation)}>
-                                  {c.evaluation}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
         </div>
       );
     }
