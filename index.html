@@ -5760,16 +5760,18 @@
         return list;
       }, [candidates, reportType, filterInt]);
 
-      // Dispara automaticamente a geração de resumos via Gemini API para todos os filtrados que faltam
+      // Disparador otimizado e seguro contra loops para gerar resumos via Gemini API
       useEffect(() => {
-        let isMounted = true;
-        const generateAllMissingSummaries = async () => {
-          if (filteredList.length === 0) return;
-          const missing = filteredList.filter(c => !candidateAiSummaries[c.id]);
-          if (missing.length === 0) return;
+        if (filteredList.length === 0 || reportType === 'lista_aprovados') return;
+        
+        const missing = filteredList.filter(c => !candidateAiSummaries[c.id]);
+        if (missing.length === 0) return;
 
+        let isMounted = true;
+        const generateMissing = async () => {
           setIsGeneratingAll(true);
-          let completedCount = filteredList.length - missing.length;
+          let updatedSummaries = { ...candidateAiSummaries };
+          let totalProcessed = filteredList.length - missing.length;
 
           for (const cand of missing) {
             if (!isMounted) break;
@@ -5790,16 +5792,18 @@
                 text = "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
               }
 
+              updatedSummaries[cand.id] = text.trim();
+              totalProcessed++;
               if (isMounted) {
-                setCandidateAiSummaries(prev => ({ ...prev, [cand.id]: text.trim() }));
-                completedCount++;
-                setGeneratingProgress(Math.round((completedCount / filteredList.length) * 100));
+                setCandidateAiSummaries({ ...updatedSummaries });
+                setGeneratingProgress(Math.round((totalProcessed / filteredList.length) * 100));
               }
             } catch (err) {
+              updatedSummaries[cand.id] = "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
+              totalProcessed++;
               if (isMounted) {
-                setCandidateAiSummaries(prev => ({ ...prev, [cand.id]: "Candidato demonstrou excelente vivência cristã e firme disposição para servir." }));
-                completedCount++;
-                setGeneratingProgress(Math.round((completedCount / filteredList.length) * 100));
+                setCandidateAiSummaries({ ...updatedSummaries });
+                setGeneratingProgress(Math.round((totalProcessed / filteredList.length) * 100));
               }
             }
           }
@@ -5808,9 +5812,9 @@
           }
         };
 
-        generateAllMissingSummaries();
+        generateMissing();
         return () => { isMounted = false; };
-      }, [filteredList, candidateAiSummaries]);
+      }, [filteredList.map(c => c.id).join(','), reportType]);
 
       // Verifica se todos os resumos dos candidatos filtrados já foram gerados pela IA (se aplicável)
       const areAllSummariesReady = useMemo(() => {
