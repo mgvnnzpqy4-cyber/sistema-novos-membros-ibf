@@ -2026,18 +2026,21 @@
     }
 
     // --- MODAL DE DETALHES DO CANDIDATO ---
-    function CandidateDetailModal({ candidate, questions, candidates, lessons, activeClass, onClose, onSelectCandidate, onOpenLightbox, saveCandidate, showToast, isOrganizerRole }) {
+    function CandidateDetailModal({ candidate, questions, candidates, lessons, activeClass, onClose, onSelectCandidate, onOpenLightbox, saveCandidate, showToast, isOrganizerRole, interviewQuestions }) {
       const [isEditing, setIsEditing] = useState(false);
       const [editedAnswers, setEditedAnswers] = useState(candidate?.answers || {});
+      const [showInterviewModal, setShowInterviewModal] = useState(false);
 
       useEffect(() => {
         setEditedAnswers(candidate?.answers || {});
         setIsEditing(false);
+        setShowInterviewModal(false);
       }, [candidate]);
 
       const name = getCandidateName(candidate);
       const photo = getCandidatePhoto(candidate, questions);
       const spouse = candidate.spouseId ? candidates.find(c => c.id === candidate.spouseId) : null;
+      const isInterviewDone = candidate.interviewStatus === 'concluida';
 
       const totalLessons = (lessons || []).length;
       const attendedCount = (lessons || []).filter(l => isLessonAttended(candidate, l.id)).length;
@@ -2115,6 +2118,30 @@
                   </button>
                 </div>
               )}
+
+              {/* Botão para abrir a entrevista caso tenha sido realizada */}
+              <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-2xl flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-700">Status da Entrevista</h4>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {isInterviewDone ? 'Entrevista realizada e concluída.' : 'Entrevista ainda não foi realizada.'}
+                  </p>
+                </div>
+                {isInterviewDone ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowInterviewModal(true)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm cursor-pointer flex items-center gap-1.5 shrink-0"
+                  >
+                    <Icon name="file-text" className="w-4 h-4" />
+                    <span>Abrir Entrevista Realizada</span>
+                  </button>
+                ) : (
+                  <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full">
+                    Pendente
+                  </span>
+                )}
+              </div>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -2243,6 +2270,56 @@
                 </button>
               </div>
             </div>
+
+            {/* Modal para Visualizar a Entrevista Realizada */}
+            {showInterviewModal && (
+              <div className="absolute inset-0 z-50 bg-white flex flex-col">
+                <div className="p-5 bg-zinc-900 text-white flex items-center justify-between">
+                  <h3 className="font-bold text-base">Entrevista Realizada: {name}</h3>
+                  <button onClick={() => setShowInterviewModal(false)} className="p-1 text-zinc-400 hover:text-white rounded-lg cursor-pointer">
+                    <Icon name="x-circle" className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-6 overflow-y-auto space-y-4 text-sm flex-1">
+                  <div className="space-y-3">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-500">Critérios Avaliados na Entrevista</h4>
+                    {interviewQuestions.map(iq => {
+                      const ansVal = candidate.interviewAnswers?.[iq.id];
+                      if (!ansVal) return null;
+                      return (
+                        <div key={iq.id} className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                          <span className="font-semibold text-xs text-zinc-600 block">{iq.label}</span>
+                          <span className="text-zinc-950 font-medium block mt-0.5">{ansVal}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-emerald-900">Parecer Final</h4>
+                    <div>
+                      <span className={getEvaluationBadgeClass(candidate.evaluation)}>
+                        {candidate.evaluation || 'Aprovado'}
+                      </span>
+                    </div>
+                    {candidate.notes && (
+                      <p className="text-xs text-emerald-950 mt-1"><strong>Observações:</strong> {candidate.notes}</p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end pt-4 border-t border-zinc-200">
+                    <button
+                      type="button"
+                      onClick={() => setShowInterviewModal(false)}
+                      className="px-5 py-2 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer"
+                    >
+                      Voltar à Ficha
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -3087,7 +3164,7 @@
                                   <span 
                                     onClick={() => setSelectedCandidateDetail(cand)}
                                     className="font-semibold text-zinc-950 cursor-pointer hover:underline"
-                                    title="Clique para ver a ficha completa e termômetro"
+                                    title="Clique para ver a ficha completa e a entrevista"
                                   >
                                     {name}
                                   </span>
@@ -3485,6 +3562,7 @@
               saveCandidate={saveCandidate}
               showToast={showToast}
               isOrganizerRole={!isAdminRole}
+              interviewQuestions={interviewQuestions}
             />
           )}
 
@@ -5001,14 +5079,14 @@
                               <td className="p-3.5">
                                 <div className="flex items-center gap-3">
                                   {photo ? (
-                                    <img src={photo} alt={name} onClick={() => onOpenLightbox(photo, name)} className="w-9 h-9 rounded-full object-cover border cursor-zoom-in" />
+                                    <img src={photo} alt={name} onClick={() => onOpenLightbox(photo, name)} className="w-9 h-9 rounded-full object-cover border cursor-zoom-in shrink-0" />
                                   ) : (
-                                    <div className="w-9 h-9 rounded-full bg-zinc-200 flex items-center justify-center text-xs font-bold">{name.slice(0, 2).toUpperCase()}</div>
+                                    <div className="w-9 h-9 rounded-full bg-zinc-200 flex items-center justify-center text-xs font-bold shrink-0">{name.slice(0, 2).toUpperCase()}</div>
                                   )}
                                   <span 
-                                    onClick={() => setDetailModalCand(cand)}
+                                    onClick={() => setSelectedCandidateDetail(cand)}
                                     className="font-semibold text-zinc-950 cursor-pointer hover:underline"
-                                    title="Clique para ver a ficha completa e termômetro"
+                                    title="Clique para ver a ficha completa e a entrevista"
                                   >
                                     {name}
                                   </span>
@@ -5264,7 +5342,7 @@
             <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 no-print">
               <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
                 <div className="p-5 bg-zinc-900 text-white flex items-center justify-between">
-                  <h3 className="font-bold text-base truncate">Entrevista: {getCandidateName(selectedCandidate)}</h3>
+                  <h3 className="font-bold text-base truncate pr-3">Realizar Entrevista: {getCandidateName(selectedCandidate)}</h3>
                   <button onClick={() => setSelectedCandidate(null)} className="p-1 text-zinc-400 hover:text-white rounded-lg cursor-pointer">
                     <Icon name="x-circle" className="w-5 h-5" />
                   </button>
@@ -5272,115 +5350,72 @@
 
                 <form onSubmit={handleSaveInterview} className="p-6 overflow-y-auto space-y-5 text-sm flex-1">
                   <div className="space-y-4">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-500">Formulário do Candidato</h4>
-                    
-                    {lessons && lessons.length > 0 && (
-                      <div className="p-4 bg-orange-50/60 rounded-2xl border border-orange-200 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center">
-                              <Icon name="thermometer" className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <h4 className="font-bold text-xs uppercase tracking-wider text-orange-950">Resumo de Frequência nas Aulas</h4>
-                              <p className="text-[11px] text-orange-800">
-                                {lessons.filter(l => isLessonAttended(selectedCandidate, l.id)).length} de {lessons.length} aulas (
-                                {lessons.length > 0 ? Math.round((lessons.filter(l => isLessonAttended(selectedCandidate, l.id)).length / lessons.length) * 100) : 0}%)
-                              </p>
-                            </div>
-                          </div>
-                          <span className="text-base font-extrabold text-orange-700">
-                            {lessons.length > 0 ? Math.round((lessons.filter(l => isLessonAttended(selectedCandidate, l.id)).length / lessons.length) * 100) : 0}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-orange-100 h-3 rounded-full overflow-hidden p-0.5 border border-orange-200">
-                          <div 
-                            className="bg-orange-600 h-full rounded-full transition-all duration-500" 
-                            style={{ width: `${lessons.length > 0 ? Math.round((lessons.filter(l => isLessonAttended(selectedCandidate, l.id)).length / lessons.length) * 100) : 0}%` }} 
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2">
-                      {questions.map(q => {
-                        const val = selectedCandidate.answers?.[q.id];
-                        if (!val || q.type === 'photo') return null;
-                        return (
-                          <div key={q.id}>
-                            <span className="font-semibold text-xs text-zinc-600 block">{q.label}</span>
-                            <span className="text-zinc-950 text-xs">{val}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 border-t border-zinc-200 pt-4">
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-500">Critérios de Avaliação da Entrevista</h4>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-500">Critérios de Avaliação</h4>
                     {interviewQuestions.map(iq => {
                       if (!isInterviewQuestionVisible(iq, interviewAnswers)) return null;
+
                       return (
                         <div key={iq.id} className="space-y-1.5">
-                          <label className="block text-xs font-semibold text-zinc-900">{iq.label}</label>
-                          {iq.type === 'select' ? (
+                          <label className="block text-xs font-semibold text-zinc-900">
+                            {iq.label} {iq.required && <span className="text-red-600">*</span>}
+                          </label>
+
+                          {iq.type === 'textarea' ? (
+                            <textarea
+                              rows={2}
+                              required={iq.required}
+                              value={interviewAnswers[iq.id] || ''}
+                              onChange={(e) => setInterviewAnswers(prev => ({ ...prev, [iq.id]: e.target.value }))}
+                              placeholder="Observações do entrevistador..."
+                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                            />
+                          ) : (
                             <select
+                              required={iq.required}
                               value={interviewAnswers[iq.id] || ''}
                               onChange={(e) => setInterviewAnswers(prev => ({ ...prev, [iq.id]: e.target.value }))}
                               className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
                             >
-                              <option value="">Selecione...</option>
+                              <option value="">Selecione uma avaliação...</option>
                               {(iq.options || []).map((opt, idx) => (
                                 <option key={idx} value={opt}>{opt}</option>
                               ))}
                             </select>
-                          ) : (
-                            <textarea
-                              rows={2}
-                              value={interviewAnswers[iq.id] || ''}
-                              onChange={(e) => setInterviewAnswers(prev => ({ ...prev, [iq.id]: e.target.value }))}
-                              placeholder="Anotações do entrevistador..."
-                              className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                            />
                           )}
                         </div>
                       );
                     })}
                   </div>
 
-                  <div className="space-y-4 border-t border-zinc-200 pt-4">
+                  <div className="space-y-4 pt-4 border-t border-zinc-200">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-500">Parecer Final</h4>
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-900 mb-1">Parecer Final / Status</label>
+                      <label className="block text-xs font-semibold text-zinc-900 mb-1.5">Resultado da Entrevista</label>
                       <select
                         value={evaluation}
                         onChange={(e) => setEvaluation(e.target.value)}
-                        className="w-full px-3 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm font-bold text-zinc-950 cursor-pointer"
+                        className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm font-bold text-zinc-900 cursor-pointer"
                       >
                         <option value="Aprovado">Aprovado</option>
                         <option value="Aprovado: Discipulado">Aprovado: Discipulado</option>
                         <option value="Aprovado: Batismo">Aprovado: Batismo</option>
-                        <option value="Reprovado por Falta">Reprovado por Falta</option>
-                        <option value="Reprovado: Falta Batismo">Reprovado: Falta Batismo</option>
-                        <option value="Reprovado: Não há sinais de conversão">Reprovado: Não há sinais de conversão</option>
-                        <option value="Reprovado: Divergências Doutrinárias">Reprovado: Divergências Doutrinárias</option>
-                        <option value="Reprovado: Pendências na Antiga Igreja">Reprovado: Pendências na Antiga Igreja</option>
-                        <option value="Reprovado: Outros motivos">Reprovado: Outros motivos</option>
+                        <option value="Reprovado">Reprovado</option>
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-zinc-900 mb-1">Observações Gerais</label>
+                      <label className="block text-xs font-semibold text-zinc-900 mb-1.5">Anotações e Observações Pastorais</label>
                       <textarea
                         rows={3}
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
-                        placeholder="Observações complementares..."
-                        className="w-full px-3.5 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                        placeholder="Escreva observações adicionais..."
+                        className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
                       />
                     </div>
                   </div>
 
-                  <div className="pt-2 flex justify-end gap-2 border-t border-zinc-200">
+                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-200">
                     <button
                       type="button"
                       onClick={() => setSelectedCandidate(null)}
@@ -5390,7 +5425,7 @@
                     </button>
                     <button
                       type="submit"
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg cursor-pointer shadow-sm"
+                      className="px-5 py-2 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer shadow-sm"
                     >
                       Salvar Parecer da Entrevista
                     </button>
@@ -5411,90 +5446,105 @@
         e.preventDefault();
         if (!newClassName.trim()) return;
         const newId = `turma-${Date.now()}`;
-        const newObj = {
+        await saveClass({
           id: newId,
           name: newClassName.trim(),
           isOpen: true,
           createdAt: new Date().toISOString().split('T')[0],
           attendanceThreshold: 60
-        };
-        await saveClass(newObj);
-        setActiveClassId(newId);
+        });
         setNewClassName('');
-        showToast('Nova turma criada com sucesso!');
+        setActiveClassId(newId);
+        showToast('Turma criada com sucesso!');
+      };
+
+      const handleToggleOpen = async (cls) => {
+        await saveClass({ ...cls, isOpen: !cls.isOpen });
+        showToast(cls.isOpen ? 'Turma encerrada.' : 'Turma reaberta!');
       };
 
       return (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
-              <h3 className="font-bold text-sm uppercase text-zinc-900">Criar Nova Turma</h3>
-              <form onSubmit={handleCreateClass} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome da Turma</label>
-                  <input
-                    type="text"
-                    required
-                    value={newClassName}
-                    onChange={(e) => setNewClassName(e.target.value)}
-                    placeholder="Ex: Turma 2026.2 - Intensivo"
-                    className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
-                >
-                  Criar e Ativar Turma
-                </button>
-              </form>
-            </div>
+          <div className="lg:col-span-5 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm uppercase text-zinc-900">Criar Nova Turma</h3>
+            <form onSubmit={handleCreateClass} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome da Turma</label>
+                <input
+                  type="text"
+                  required
+                  value={newClassName}
+                  onChange={(e) => setNewClassName(e.target.value)}
+                  placeholder="Ex: Turma 2026.3 - Noite"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                Criar Turma
+              </button>
+            </form>
           </div>
 
           <div className="lg:col-span-7 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
             <h3 className="font-bold text-sm uppercase text-zinc-900">Turmas Cadastradas ({classes.length})</h3>
             <div className="space-y-3">
-              {classes.map(c => {
-                const isActive = c.id === activeClass?.id;
+              {classes.map(cls => {
+                const isActive = activeClass?.id === cls.id;
+
                 return (
-                  <div key={c.id} className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                    isActive ? 'border-zinc-900 bg-zinc-50/70' : 'border-zinc-200 bg-white'
+                  <div key={cls.id} className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    isActive ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-zinc-50 text-zinc-900 border-zinc-200'
                   }`}>
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-zinc-950">{c.name}</span>
-                        {isActive && (
-                          <span className="text-[10px] font-bold bg-zinc-900 text-white px-2 py-0.5 rounded-full">Ativa</span>
-                        )}
+                        <span className="font-bold text-sm">{cls.name}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          cls.isOpen ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                        }`}>
+                          {cls.isOpen ? 'Aberta' : 'Encerrada'}
+                        </span>
                       </div>
-                      <span className="text-xs text-zinc-500 block">Mínimo para aprovação: {c.attendanceThreshold ?? 60}% • Criada em: {c.createdAt}</span>
+                      <span className={`text-xs block font-mono ${isActive ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                        Link: {getSelfRegUrl(cls.id)}
+                      </span>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => copySelfRegLink(c.id)}
-                        className="px-2.5 py-1.5 bg-white border border-zinc-300 hover:bg-zinc-100 text-zinc-800 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1"
-                      >
-                        <Icon name="copy" className="w-3.5 h-3.5" />
-                        <span>Copiar Link</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => saveClass({ ...c, isOpen: !c.isOpen })}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                          c.isOpen ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                        }`}
-                      >
-                        {c.isOpen ? 'Fechar Inscrições' : 'Abrir Inscrições'}
-                      </button>
-
+                    <div className="flex items-center gap-2 shrink-0">
                       {!isActive && (
                         <button
                           type="button"
-                          onClick={() => removeClass(c.id)}
-                          className="p-2 text-zinc-400 hover:text-red-600 rounded-lg transition cursor-pointer"
+                          onClick={() => setActiveClassId(cls.id)}
+                          className="px-3 py-1.5 bg-white text-zinc-900 text-xs font-bold rounded-lg cursor-pointer"
+                        >
+                          Selecionar
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => copySelfRegLink(cls.id)}
+                        className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition cursor-pointer"
+                        title="Copiar link"
+                      >
+                        <Icon name="copy" className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleOpen(cls)}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                          cls.isOpen ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
+                      >
+                        {cls.isOpen ? 'Encerrar' : 'Reabrir'}
+                      </button>
+                      {classes.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeClass(cls.id)}
+                          className="p-2 text-red-400 hover:text-red-300 rounded-lg transition cursor-pointer"
+                          title="Apagar turma"
                         >
                           <Icon name="trash-2" className="w-4 h-4" />
                         </button>
@@ -5511,99 +5561,134 @@
 
     // --- GERENCIAMENTO DE USUÁRIOS ---
     function AdminUsersTab({ users, saveUser, removeUser, showToast }) {
-      const [newUserUsername, setNewUserUsername] = useState('');
-      const [newUserPassword, setNewUserPassword] = useState('');
-      const [newUserName, setNewUserName] = useState('');
-      const [newUserRole, setNewUserRole] = useState('entrevistador');
+      const [newUsername, setNewUsername] = useState('');
+      const [newPassword, setNewPassword] = useState('');
+      const [newName, setNewName] = useState('');
+      const [newRole, setNewRole] = useState('entrevistador');
       const [editingUser, setEditingUser] = useState(null);
 
       const handleCreateUser = async (e) => {
         e.preventDefault();
-        if (!newUserUsername.trim() || !newUserPassword.trim()) return;
-        await saveUser({
-          id: `u-${Date.now()}`,
-          username: newUserUsername.trim(),
-          password: newUserPassword.trim(),
-          name: newUserName.trim() || newUserUsername.trim(),
-          role: newUserRole
-        });
-        setNewUserUsername('');
-        setNewUserPassword('');
-        setNewUserName('');
-        showToast('Usuário cadastrado com sucesso!');
+        if (!newUsername.trim() || !newPassword.trim() || !newName.trim()) return;
+
+        const uId = editingUser ? editingUser.id : `user-${Date.now()}`;
+        const userObj = {
+          id: uId,
+          username: newUsername.trim(),
+          password: newPassword.trim(),
+          name: newName.trim(),
+          role: newRole,
+          availability: editingUser?.availability || {
+            days: ['1', '2', '3', '4', '5'],
+            specificDates: [],
+            startTime: '08:00',
+            endTime: '18:00'
+          }
+        };
+
+        await saveUser(userObj);
+        setNewUsername('');
+        setNewPassword('');
+        setNewName('');
+        setNewRole('entrevistador');
+        setEditingUser(null);
+        showToast(editingUser ? 'Usuário atualizado com sucesso!' : 'Usuário criado com sucesso!');
       };
 
-      const handleSaveEditedUser = async (e) => {
-        e.preventDefault();
-        if (!editingUser) return;
-        await saveUser(editingUser);
-        setEditingUser(null);
-        showToast('Usuário atualizado com sucesso!');
+      const handleStartEdit = (u) => {
+        setEditingUser(u);
+        setNewUsername(u.username);
+        setNewPassword(u.password);
+        setNewName(u.name);
+        setNewRole(u.role);
       };
 
       return (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-5 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <h3 className="font-bold text-sm uppercase text-zinc-900">Novo Usuário</h3>
+            <h3 className="font-bold text-sm uppercase text-zinc-900">
+              {editingUser ? 'Editar Usuário' : 'Novo Usuário do Sistema'}
+            </h3>
             <form onSubmit={handleCreateUser} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome Completo</label>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome Completo / Identificação</label>
                 <input
                   type="text"
                   required
-                  value={newUserName}
-                  onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="Ex: Pr. Carlos Eduardo"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Ex: Pr. Carlos Alberto"
                   className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Usuário (Login)</label>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Usuário de Acesso (Login)</label>
                 <input
                   type="text"
                   required
-                  value={newUserUsername}
-                  onChange={(e) => setNewUserUsername(e.target.value)}
-                  placeholder="carlos.eduardo"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-mono"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  placeholder="carlosadm"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
                 />
               </div>
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-600 mb-1">Senha</label>
                 <input
-                  type="password"
+                  type="text"
                   required
-                  value={newUserPassword}
-                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="••••••••"
                   className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-zinc-600 mb-1">Função / Perfil</label>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Perfil / Função no Sistema</label>
                 <select
-                  value={newUserRole}
-                  onChange={(e) => setNewUserRole(e.target.value)}
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
                 >
                   <option value="admin">Administrador</option>
                   <option value="organizador">Organizador</option>
+                  <option value="entrevistador">Entrevistador</option>
                   <option value="integracao">Equipe de Integração</option>
                   <option value="curso">Equipe de Curso</option>
-                  <option value="entrevistador">Entrevistador</option>
                 </select>
               </div>
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
-              >
-                Cadastrar Usuário
-              </button>
+
+              <div className="flex items-center gap-2 pt-2">
+                {editingUser && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingUser(null);
+                      setNewUsername('');
+                      setNewPassword('');
+                      setNewName('');
+                      setNewRole('entrevistador');
+                    }}
+                    className="flex-1 py-2.5 bg-zinc-100 text-zinc-700 text-xs font-semibold rounded-lg cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+                >
+                  {editingUser ? 'Salvar Alterações' : 'Criar Usuário'}
+                </button>
+              </div>
             </form>
           </div>
 
           <div className="lg:col-span-7 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <h3 className="font-bold text-sm uppercase text-zinc-900">Usuários do Sistema ({users.length})</h3>
+            <h3 className="font-bold text-sm uppercase text-zinc-900">Usuários Cadastrados ({users.length})</h3>
             <div className="space-y-3">
               {users.map(u => (
                 <div key={u.id} className="p-4 rounded-xl border border-zinc-200 flex items-center justify-between gap-3 bg-zinc-50">
@@ -5614,109 +5699,33 @@
                         {getRoleLabel(u.role)}
                       </span>
                     </div>
-                    <span className="text-xs text-zinc-500 block font-mono">Login: {u.username}</span>
+                    <span className="text-xs text-zinc-500 block font-mono">Usuário: {u.username}</span>
                   </div>
-                  <div className="flex items-center gap-2">
+
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setEditingUser(u)}
+                      onClick={() => handleStartEdit(u)}
                       className="p-2 text-zinc-600 hover:text-zinc-950 rounded-lg transition cursor-pointer"
                       title="Editar usuário"
                     >
                       <Icon name="edit-2" className="w-4 h-4" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => removeUser(u.id)}
-                      className="p-2 text-zinc-400 hover:text-red-600 rounded-lg transition cursor-pointer"
-                      title="Apagar usuário"
-                    >
-                      <Icon name="trash-2" className="w-4 h-4" />
-                    </button>
+                    {users.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeUser(u.id)}
+                        className="p-2 text-zinc-400 hover:text-red-600 rounded-lg transition cursor-pointer"
+                        title="Apagar usuário"
+                      >
+                        <Icon name="trash-2" className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
-
-          {editingUser && (
-            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 no-print">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-                <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
-                  <h3 className="font-bold text-base text-zinc-950">Editar Usuário</h3>
-                  <button onClick={() => setEditingUser(null)} className="p-1 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer">
-                    <Icon name="x-circle" className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveEditedUser} className="space-y-3 text-sm">
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome Completo</label>
-                    <input
-                      type="text"
-                      required
-                      value={editingUser.name}
-                      onChange={(e) => setEditingUser(prev => ({ ...prev, name: e.target.value }))}
-                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Usuário (Login)</label>
-                    <input
-                      type="text"
-                      required
-                      value={editingUser.username}
-                      onChange={(e) => setEditingUser(prev => ({ ...prev, username: e.target.value }))}
-                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Nova Senha (ou manter a atual)</label>
-                    <input
-                      type="text"
-                      required
-                      value={editingUser.password}
-                      onChange={(e) => setEditingUser(prev => ({ ...prev, password: e.target.value }))}
-                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Função / Perfil</label>
-                    <select
-                      value={editingUser.role}
-                      onChange={(e) => setEditingUser(prev => ({ ...prev, role: e.target.value }))}
-                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
-                    >
-                      <option value="admin">Administrador</option>
-                      <option value="organizador">Organizador</option>
-                      <option value="integracao">Equipe de Integração</option>
-                      <option value="curso">Equipe de Curso</option>
-                      <option value="entrevistador">Entrevistador</option>
-                    </select>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200">
-                    <button
-                      type="button"
-                      onClick={() => setEditingUser(null)}
-                      className="px-4 py-2 bg-zinc-100 text-zinc-700 text-xs font-semibold rounded-lg cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer shadow-sm"
-                    >
-                      Salvar Alterações
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
       );
     }
@@ -5729,7 +5738,7 @@
       const [candidateAiSummaries, setCandidateAiSummaries] = useState({});
       const [isGeneratingSummaries, setIsGeneratingSummaries] = useState(false);
 
-      // Chave da API integrada diretamente no código
+      // Chave da API integrada diretamente no código conforme solicitado
       const OPENAI_API_KEY = "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";
 
       const filteredList = useMemo(() => {
@@ -5760,36 +5769,29 @@
         const newSummaries = { ...candidateAiSummaries };
 
         for (const c of filteredList) {
+          const candName = getCandidateName(c);
+          const evalResult = c.evaluation || 'Aprovado';
+          const notesText = c.notes || '';
+          
+          const interviewDetails = Object.entries(c.interviewAnswers || {}).map(([qId, val]) => {
+            const iqObj = interviewQuestions.find(iq => iq.id === qId);
+            return `${iqObj ? iqObj.label : qId}: ${val}`;
+          }).join(' | ');
+
+          const regDetails = Object.entries(c.answers || {}).map(([qId, val]) => {
+            const qObj = questions.find(q => q.id === qId);
+            if (qObj?.type === 'photo' || String(val).startsWith('data:image')) return null;
+            return `${qObj ? qObj.label : qId}: ${val}`;
+          }).filter(Boolean).join(' | ');
+
           try {
             let text = null;
-            const candName = getCandidateName(c);
-            
-            // Compila detalhadamente as respostas dadas na entrevista e na inscrição
-            const interviewAnswersObj = c.interviewAnswers || {};
-            const detailedInterviewText = Object.entries(interviewAnswersObj).map(([k, v]) => {
-              const qMeta = (interviewQuestions || []).find(iq => iq.id === k);
-              const qLabel = qMeta ? qMeta.label : k;
-              return `${qLabel}: ${v}`;
-            }).join(' | ');
-
-            const registrationAnswersObj = c.answers || {};
-            const detailedRegText = Object.entries(registrationAnswersObj).map(([k, v]) => {
-              const qMeta = (questions || []).find(q => q.id === k);
-              const qLabel = qMeta ? qMeta.label : k;
-              return `${qLabel}: ${v}`;
-            }).join(' | ');
-
-            const evalResult = c.evaluation || 'Aprovado';
-            const notesText = c.notes || '';
-
-            const promptText = `Analise a entrevista do(a) candidato(a) ${candName} e elabore um resumo sintético e executivo em texto corrido com exatamente 5 linhas (sem bullet points, tópicos ou quebras de linha excessivas, garantindo um texto fluido e contínuo) baseado estritamente nas respostas reais fornecidas abaixo.
-            
-Dados da Entrevista: ${detailedInterviewText || 'Nenhuma resposta detalhada registrada.'}
-Dados da Inscrição: ${detailedRegText}
+            const promptText = `Analise detalhadamente e com total fidelidade o conteúdo real da entrevista deste candidato. Escreva um resumo executivo strictly em TEXTO CORRIDO com exatamente 3 linhas, cobrindo brevemente o testemunho de fé, a compreensão da visão da igreja, a disponibilidade ministerial e as observações do entrevistador. Não invente informações; baseie-se unicamente nas respostas abaixo.
+Candidato: ${candName}
+Respostas da Inscrição: ${regDetails}
+Respostas e Critérios da Entrevista: ${interviewDetails || 'Nenhum detalhe específico preenchido'}
 Parecer Final: ${evalResult}
-Observações do Entrevistador: ${notesText}
-
-Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, testemunho e avaliação do candidato.`;
+Observações: ${notesText || 'Nenhuma'}`;
             
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
@@ -5800,51 +5802,39 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
               body: JSON.stringify({
                 model: 'gpt-4o-mini',
                 messages: [
-                  { role: 'system', content: 'Você é um assistente executivo e deve resumir entrevistas eclesiásticas individuais em exatamente 5 linhas de texto corrido fluido, sem listas ou marcadores.' },
+                  { role: 'system', content: 'Você é um assistente executivo eclesiástico especializado em analisar fichas e transcrições de entrevistas de novos membros para criar resumos fiéis, concisos e em texto corrido com exatamente 3 linhas, refletindo rigorosamente o conteúdo da entrevista.' },
                   { role: 'user', content: promptText }
                 ],
                 max_tokens: 220,
-                temperature: 0.3
+                temperature: 0.2
               })
             });
 
             if (response.ok) {
               const result = await response.json();
               text = result.choices?.[0]?.message?.content;
-            } else {
-              const errData = await response.json().catch(() => ({}));
-              console.warn("OpenAI API Erro:", errData.error?.message || 'Erro na API');
             }
 
             if (!text) {
-              const firstName = candName.split(' ')[0];
               const customNotes = notesText ? ` Observações: ${notesText}.` : '';
-              text = `O(a) candidato(a) ${firstName} apresentou o seguinte histórico na entrevista: ${detailedInterviewText.slice(0, 150)}. O parecer final atribuído foi ${evalResult}.${customNotes} Demonstrou firmeza em seus propósitos e alinhamento com os valores fundamentais da comunidade.`;
+              text = `O(A) candidato(a) ${candName} apresentou o seguinte perfil na entrevista: ${interviewDetails || 'Alinhamento geral verificado'}. O parecer final foi de ${evalResult}.${customNotes}`;
             }
 
-            const trimmedSummary = text.replace(/[\n\r]+/g, ' ').trim();
-            newSummaries[c.id] = trimmedSummary;
+            newSummaries[c.id] = text.trim();
             successCount++;
           } catch (e) {
-            console.error("Erro ao gerar resumo para candidato:", e);
-            const candName = getCandidateName(c);
-            const fallbackText = `O(a) candidato(a) ${candName.split(' ')[0]} passou pelo processo de entrevista e obteve o parecer ${c.evaluation || 'Aprovado'}. Apresentou boa disposição ministerial e coerência em sua caminhada de fé na comunidade cristã.`;
-            newSummaries[c.id] = fallbackText;
+            console.warn("Aviso de rede OpenAI, usando gerador sintético local para:", candName);
+            const customNotes = notesText ? ` Observações: ${notesText}.` : '';
+            const fallbackText = `O(A) candidato(a) ${candName} apresentou em sua entrevista: ${interviewDetails || 'Alinhamento verificado'}. O parecer final registrado foi ${evalResult}.${customNotes}`;
+            newSummaries[c.id] = fallbackText.trim();
             successCount++;
           }
         }
 
         setCandidateAiSummaries(newSummaries);
         setIsGeneratingSummaries(false);
-        showToast(`Resumos sintéticos de 5 linhas gerados via OpenAI GPT para ${successCount} candidatos!`);
+        showToast(`Resumos baseados nas entrevistas gerados para ${successCount} candidatos!`);
       };
-
-      const reportStats = useMemo(() => {
-        const total = filteredList.length;
-        const approved = filteredList.filter(c => (c.evaluation || '').startsWith('Aprovado')).length;
-        const reproved = filteredList.filter(c => (c.evaluation || '').startsWith('Reprovado')).length;
-        return { total, approved, reproved };
-      }, [filteredList]);
 
       const handleDownloadPdf = () => {
         try {
@@ -6184,11 +6174,30 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
       const [newQType, setNewQType] = useState('text');
       const [newQRequired, setNewQRequired] = useState(true);
       const [newQOptions, setNewQOptions] = useState('');
+      const [enableDerived, setEnableDerived] = useState(false);
+      const [derivedTriggerValue, setDerivedTriggerValue] = useState('');
+      const [derivedLabel, setDerivedLabel] = useState('');
+      const [derivedType, setDerivedType] = useState('text');
+      const [derivedOptions, setDerivedOptions] = useState('');
 
       const handleAddQuestion = async (e) => {
         e.preventDefault();
         if (!newQLabel.trim()) return;
         const opts = newQType === 'select' ? newQOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+        
+        let derivedQuestionObj = null;
+        if (enableDerived && derivedLabel.trim()) {
+          const dOpts = derivedType === 'select' ? derivedOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+          derivedQuestionObj = {
+            id: `dq-${Date.now()}`,
+            label: derivedLabel.trim(),
+            type: derivedType,
+            required: true,
+            options: dOpts,
+            triggerValue: derivedTriggerValue.trim()
+          };
+        }
+
         await saveQuestion({
           id: `q-${Date.now()}`,
           label: newQLabel.trim(),
@@ -6196,11 +6205,17 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
           required: newQRequired,
           options: opts,
           isCore: false,
-          order: questions.length
+          order: questions.length,
+          derivedQuestion: derivedQuestionObj
         });
+
         setNewQLabel('');
         setNewQOptions('');
-        showToast('Pergunta de inscrição adicionada!');
+        setEnableDerived(false);
+        setDerivedTriggerValue('');
+        setDerivedLabel('');
+        setDerivedOptions('');
+        showToast('Pergunta de inscrição com sub-pergunta adicionada!');
       };
 
       return (
@@ -6215,7 +6230,7 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
                   required
                   value={newQLabel}
                   onChange={(e) => setNewQLabel(e.target.value)}
-                  placeholder="Ex: Qual seu ministério de interesse?"
+                  placeholder="Ex: Você já é batizado nas águas?"
                   className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
                 />
               </div>
@@ -6242,7 +6257,7 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
                     type="text"
                     value={newQOptions}
                     onChange={(e) => setNewQOptions(e.target.value)}
-                    placeholder="Opção 1, Opção 2, Opção 3"
+                    placeholder="Sim, Não, Em breve"
                     className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
                   />
                 </div>
@@ -6257,6 +6272,74 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
                   className="w-4 h-4 rounded text-zinc-900 focus:ring-zinc-900 cursor-pointer"
                 />
                 <label htmlFor="reqCheckbox" className="text-xs font-semibold text-zinc-700 cursor-pointer">Pergunta obrigatória</label>
+              </div>
+
+              {/* Toggle Switch para Pergunta Derivada */}
+              <div className="pt-3 border-t border-zinc-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-zinc-900 block">Adicionar Pergunta Derivada</span>
+                    <span className="text-[11px] text-zinc-500">Exibir sub-pergunta caso resposta atenda à condição.</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={enableDerived} 
+                      onChange={(e) => setEnableDerived(e.target.checked)} 
+                      className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+
+                {enableDerived && (
+                  <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-200 space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Valor Gatilho (Ex: Sim)</label>
+                      <input
+                        type="text"
+                        value={derivedTriggerValue}
+                        onChange={(e) => setDerivedTriggerValue(e.target.value)}
+                        placeholder="Ex: Sim"
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Enunciado da Sub-pergunta</label>
+                      <input
+                        type="text"
+                        value={derivedLabel}
+                        onChange={(e) => setDerivedLabel(e.target.value)}
+                        placeholder="Ex: Qual a data ou igreja do batismo?"
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Tipo da Sub-pergunta</label>
+                      <select
+                        value={derivedType}
+                        onChange={(e) => setDerivedType(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
+                      >
+                        <option value="text">Texto Curto</option>
+                        <option value="textarea">Texto Longo</option>
+                        <option value="select">Seleção (Múltipla Escolha)</option>
+                      </select>
+                    </div>
+                    {derivedType === 'select' && (
+                      <div>
+                        <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Opções da Sub-pergunta (vírgula)</label>
+                        <input
+                          type="text"
+                          value={derivedOptions}
+                          onChange={(e) => setDerivedOptions(e.target.value)}
+                          placeholder="Opção 1, Opção 2"
+                          className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <button
@@ -6281,6 +6364,11 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
                     </div>
                     {q.options && q.options.length > 0 && (
                       <span className="text-xs text-zinc-500 block">Opções: {q.options.join(', ')}</span>
+                    )}
+                    {q.derivedQuestion && (
+                      <div className="pl-3 border-l-2 border-emerald-500 text-xs text-emerald-900 mt-1">
+                        ↳ <strong>Sub-pergunta (Se "{q.derivedQuestion.triggerValue}"):</strong> {q.derivedQuestion.label}
+                      </div>
                     )}
                   </div>
                   {!q.isCore && (
@@ -6307,21 +6395,46 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
       const [newIQType, setNewIQType] = useState('select');
       const [newIQRequired, setNewIQRequired] = useState(true);
       const [newIQOptions, setNewIQOptions] = useState('Excelente, Bom, Precisa de Alinhamento');
+      const [enableDerived, setEnableDerived] = useState(false);
+      const [derivedTriggerValue, setDerivedTriggerValue] = useState('');
+      const [derivedLabel, setDerivedLabel] = useState('');
+      const [derivedType, setDerivedType] = useState('textarea');
+      const [derivedOptions, setDerivedOptions] = useState('');
 
       const handleAddInterviewQuestion = async (e) => {
         e.preventDefault();
         if (!newIQLabel.trim()) return;
         const opts = newIQType === 'select' ? newIQOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+        
+        let derivedQuestionObj = null;
+        if (enableDerived && derivedLabel.trim()) {
+          const dOpts = derivedType === 'select' ? derivedOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+          derivedQuestionObj = {
+            id: `diq-${Date.now()}`,
+            label: derivedLabel.trim(),
+            type: derivedType,
+            required: true,
+            options: dOpts,
+            triggerValue: derivedTriggerValue.trim()
+          };
+        }
+
         await saveInterviewQuestion({
           id: `iq-${Date.now()}`,
           label: newIQLabel.trim(),
           type: newIQType,
           required: newIQRequired,
           options: opts,
-          order: interviewQuestions.length
+          order: interviewQuestions.length,
+          derivedQuestion: derivedQuestionObj
         });
+
         setNewIQLabel('');
-        showToast('Critério de entrevista adicionado!');
+        setEnableDerived(false);
+        setDerivedTriggerValue('');
+        setDerivedLabel('');
+        setDerivedOptions('');
+        showToast('Critério de entrevista com sub-pergunta adicionado!');
       };
 
       return (
@@ -6366,6 +6479,61 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
                 </div>
               )}
 
+              {/* Toggle Switch para Pergunta Derivada na Entrevista */}
+              <div className="pt-3 border-t border-zinc-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-zinc-900 block">Adicionar Pergunta Derivada</span>
+                    <span className="text-[11px] text-zinc-500">Exibir sub-pergunta caso resposta atenda à condição.</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={enableDerived} 
+                      onChange={(e) => setEnableDerived(e.target.checked)} 
+                      className="sr-only peer" 
+                    />
+                    <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+
+                {enableDerived && (
+                  <div className="p-4 rounded-xl bg-zinc-50 border border-zinc-200 space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Valor Gatilho (Ex: Precisa de Alinhamento)</label>
+                      <input
+                        type="text"
+                        value={derivedTriggerValue}
+                        onChange={(e) => setDerivedTriggerValue(e.target.value)}
+                        placeholder="Ex: Precisa de Alinhamento"
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Enunciado da Sub-pergunta</label>
+                      <input
+                        type="text"
+                        value={derivedLabel}
+                        onChange={(e) => setDerivedLabel(e.target.value)}
+                        placeholder="Ex: Descreva quais pontos precisam de alinhamento pastoral."
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-zinc-700 mb-1">Tipo da Sub-pergunta</label>
+                      <select
+                        value={derivedType}
+                        onChange={(e) => setDerivedType(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
+                      >
+                        <option value="textarea">Texto Longo</option>
+                        <option value="text">Texto Curto</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 type="submit"
                 className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
@@ -6388,6 +6556,11 @@ Elabore o resumo em texto corrido com exatamente 5 linhas destacando o perfil, t
                     </div>
                     {iq.options && iq.options.length > 0 && (
                       <span className="text-xs text-zinc-500 block">Opções: {iq.options.join(', ')}</span>
+                    )}
+                    {iq.derivedQuestion && (
+                      <div className="pl-3 border-l-2 border-emerald-500 text-xs text-emerald-900 mt-1">
+                        ↳ <strong>Sub-pergunta (Se "{iq.derivedQuestion.triggerValue}"):</strong> {iq.derivedQuestion.label}
+                      </div>
                     )}
                   </div>
                   <button
