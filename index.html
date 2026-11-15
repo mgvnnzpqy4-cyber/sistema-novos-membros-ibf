@@ -5742,25 +5742,10 @@
         if (candidateAiSummaries[candId]) return;
         try {
           let text = "";
+          const apiKey = "AQ.Ab8RN6LFCJEsaedT3uRI3E878zbvdpxRJlfRnCCnlcDXpNinyA";
+          
           try {
-            const apiRes = await fetch('/api/summarize', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ answers: candAnswers, evaluation: candEval, interviewAnswers: candInterviewAnswers })
-            });
-            if (apiRes.ok) {
-              const apiJson = await apiRes.json();
-              if (apiJson && apiJson.summary) {
-                text = apiJson.summary;
-              }
-            }
-          } catch (serverErr) {
-            // Fallback direto via Gemini API otimizado para Vercel
-          }
-
-          if (!text) {
             const promptText = `Escreva um resumo sintético da entrevista do candidato fundamentando-se APENAS nos dados da entrevista realizada. O resumo deve ser ultra-curto, menor que 2 linhas de texto corrido. ATENÇÃO: NÃO inclua datas, horários, telefones, e-mails ou contatos pessoais. Dados da entrevista: ${JSON.stringify(candInterviewAnswers || {})}. Parecer: ${candEval}.`;
-            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
             const response = await fetch(apiUrl, {
               method: 'POST',
@@ -5768,7 +5753,13 @@
               body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
             });
             const result = await response.json();
-            text = result.candidates?.[0]?.content?.parts?.[0]?.text || "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
+            text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          } catch (apiErr) {
+            console.warn("Erro na API Gemini:", apiErr);
+          }
+
+          if (!text) {
+            text = "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
           }
 
           setCandidateAiSummaries(prev => ({ ...prev, [candId]: text.trim() }));
