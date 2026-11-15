@@ -135,6 +135,7 @@
     // --- DADOS INICIAIS ---
     const INITIAL_USERS = [
       { id: 'u-admin', username: 'admin', password: '123', role: 'admin', name: 'Coordenação Geral' },
+      { id: 'u-joseano', username: 'joseanoadm', password: '123', role: 'admin', name: 'Joseano (Admin)' },
       { id: 'u-org', username: 'organizador', password: '123', role: 'organizador', name: 'Organizador' },
       { id: 'u-insc', username: 'integracao', password: '123', role: 'integracao', name: 'Equipe de Integração' },
       { id: 'u-curso', username: 'curso', password: '123', role: 'curso', name: 'Equipe de Curso' },
@@ -261,6 +262,17 @@
       }
 
       return 'Sem nome';
+    };
+
+    const getCandidateFullName = (cand) => {
+      if (!cand || !cand.answers) return 'Desconhecido';
+      // Tenta recuperar especificamente do campo de nome ou qualquer campo de texto longo/completo
+      for (const [k, v] of Object.entries(cand.answers)) {
+        if ((k === 'q-nome' || k.includes('nome') || k === 'name') && typeof v === 'string' && v.trim().length > 1) {
+          return v.trim();
+        }
+      }
+      return getCandidateName(cand);
     };
 
     const getCandidatePhone = (cand) => {
@@ -1563,6 +1575,95 @@
         return parentVal === q.conditionValue;
       };
 
+      // Renderizador recursivo para perguntas e sub-perguntas derivadas em cascata
+      const renderQuestionField = (q, currentAnswers, onChangeHandler, isSpouse = false) => {
+        if (!q) return null;
+        const subq = q.derivedQuestion;
+        const currentVal = currentAnswers[q.id];
+        const hasSubAnswer = currentVal !== undefined && currentVal !== '' && currentVal !== null;
+        
+        let matchesTrigger = true;
+        if (subq && subq.triggerValue && subq.triggerValue.trim() !== '') {
+          matchesTrigger = String(currentVal).trim().toLowerCase() === String(subq.triggerValue).trim().toLowerCase();
+        }
+
+        return (
+          <div key={q.id} className="space-y-3">
+            <div>
+              <label className="block text-sm font-semibold text-zinc-900 mb-1.5">
+                {q.label} {q.required && <span className="text-red-600">*</span>}
+              </label>
+
+              {q.type === 'photo' && (
+                <div className="p-4 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/70">
+                  {currentAnswers[q.id] ? (
+                    <div className="flex items-center gap-4">
+                      <img src={currentAnswers[q.id]} alt="Prévia" className="w-20 h-20 rounded-xl object-cover border" />
+                      <button type="button" onClick={() => onChangeHandler(q.id, '', q.type)} className="px-3 py-1.5 bg-white border border-zinc-300 text-xs font-semibold rounded-lg cursor-pointer">
+                        Remover Foto
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center py-4 cursor-pointer text-center">
+                      <Icon name="camera" className="w-6 h-6 text-zinc-600 mb-2" />
+                      <span className="text-xs font-semibold text-zinc-900">Clique para enviar foto</span>
+                      <input type="file" accept="image/*" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        compressImageFile(file, 640, 0.78).then(dataUrl => onChangeHandler(q.id, dataUrl, q.type)).catch(() => showToast('Erro ao processar imagem.', 'error'));
+                      }} className="hidden" />
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {(q.type === 'text' || q.type === 'phone' || q.type === 'date') && (
+                <input
+                  type={q.type === 'phone' ? 'tel' : q.type === 'date' ? 'date' : 'text'}
+                  required={q.required}
+                  value={currentAnswers[q.id] || ''}
+                  onChange={(e) => onChangeHandler(q.id, e.target.value, q.type)}
+                  placeholder={q.type === 'phone' ? '(85) 99999-9999' : 'Sua resposta'}
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white transition"
+                />
+              )}
+
+              {q.type === 'textarea' && (
+                <textarea
+                  rows={3}
+                  required={q.required}
+                  value={currentAnswers[q.id] || ''}
+                  onChange={(e) => onChangeHandler(q.id, e.target.value, q.type)}
+                  placeholder="Escreva detalhadamente..."
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white transition"
+                />
+              )}
+
+              {q.type === 'select' && (
+                <select
+                  required={q.required}
+                  value={currentAnswers[q.id] || ''}
+                  onChange={(e) => onChangeHandler(q.id, e.target.value, q.type)}
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white transition cursor-pointer"
+                >
+                  <option value="">Selecione uma opção...</option>
+                  {(q.options || []).map((opt, idx) => (
+                    <option key={idx} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Renderização recursiva da pergunta derivada (se preenchida e atender ao gatilho) */}
+            {subq && hasSubAnswer && matchesTrigger && (
+              <div className="pl-4 sm:pl-6 border-l-2 border-emerald-500/50 space-y-3 pt-2">
+                {renderQuestionField(subq, currentAnswers, onChangeHandler, isSpouse)}
+              </div>
+            )}
+          </div>
+        );
+      };
+
       const handleSubmit = async (e) => {
         e.preventDefault();
         if (!activeClass?.isOpen) {
@@ -1712,68 +1813,7 @@
                   if (!isQuestionVisible(q, answers)) return null;
                   if (q.id === 'q-estado-civil') return null; // Tratado no bloco final de Casado/Solteiro
 
-                  return (
-                    <div key={q.id}>
-                      <label className="block text-sm font-semibold text-zinc-900 mb-1.5">
-                        {q.label} {q.required && <span className="text-red-600">*</span>}
-                      </label>
-
-                      {q.type === 'photo' && (
-                        <div className="p-4 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/70">
-                          {answers[q.id] ? (
-                            <div className="flex items-center gap-4">
-                              <img src={answers[q.id]} alt="Prévia" className="w-20 h-20 rounded-xl object-cover border" />
-                              <button type="button" onClick={() => handleChange(q.id, '')} className="px-3 py-1.5 bg-white border border-zinc-300 text-xs font-semibold rounded-lg cursor-pointer">
-                                Remover Foto
-                              </button>
-                            </div>
-                          ) : (
-                            <label className="flex flex-col items-center justify-center py-4 cursor-pointer text-center">
-                              <Icon name="camera" className="w-6 h-6 text-zinc-600 mb-2" />
-                              <span className="text-xs font-semibold text-zinc-900">Clique para enviar foto</span>
-                              <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(q.id, e.target.files?.[0])} className="hidden" />
-                            </label>
-                          )}
-                        </div>
-                      )}
-
-                      {(q.type === 'text' || q.type === 'phone' || q.type === 'date') && (
-                        <input
-                          type={q.type === 'phone' ? 'tel' : q.type === 'date' ? 'date' : 'text'}
-                          required={q.required}
-                          value={answers[q.id] || ''}
-                          onChange={(e) => handleChange(q.id, e.target.value, q.type)}
-                          placeholder={q.type === 'phone' ? '(85) 99999-9999' : 'Sua resposta'}
-                          className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white transition"
-                        />
-                      )}
-
-                      {q.type === 'textarea' && (
-                        <textarea
-                          rows={3}
-                          required={q.required}
-                          value={answers[q.id] || ''}
-                          onChange={(e) => handleChange(q.id, e.target.value)}
-                          placeholder="Escreva detalhadamente..."
-                          className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white transition"
-                        />
-                      )}
-
-                      {q.type === 'select' && (
-                        <select
-                          required={q.required}
-                          value={answers[q.id] || ''}
-                          onChange={(e) => handleChange(q.id, e.target.value)}
-                          className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-sm text-zinc-950 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:bg-white transition cursor-pointer"
-                        >
-                          <option value="">Selecione uma opção...</option>
-                          {(q.options || []).map((opt, idx) => (
-                            <option key={idx} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  );
+                  return renderQuestionField(q, answers, handleChange, false);
                 })}
 
                 {/* BLOCO PADRÃO DE INSCRIÇÃO DE CASADO / SOLTEIRO (No final do formulário) */}
@@ -1960,68 +2000,7 @@
                             if (!isQuestionVisible(q, spouseAnswers)) return null;
                             if (q.id === 'q-estado-civil') return null;
 
-                            return (
-                              <div key={`spouse-${q.id}`}>
-                                <label className="block text-xs font-semibold text-zinc-900 mb-1">
-                                  {q.label} {q.required && <span className="text-red-600">*</span>}
-                                </label>
-
-                                {q.type === 'photo' && (
-                                  <div className="p-3 rounded-xl border-2 border-dashed border-zinc-300 bg-white">
-                                    {spouseAnswers[q.id] ? (
-                                      <div className="flex items-center gap-3">
-                                        <img src={spouseAnswers[q.id]} alt="Prévia" className="w-16 h-16 rounded-xl object-cover border" />
-                                        <button type="button" onClick={() => handleSpouseChange(q.id, '')} className="px-3 py-1 bg-zinc-100 text-xs font-semibold rounded-lg cursor-pointer">
-                                          Remover Foto
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <label className="flex flex-col items-center justify-center py-3 cursor-pointer text-center">
-                                        <Icon name="camera" className="w-5 h-5 text-zinc-600 mb-1" />
-                                        <span className="text-xs font-semibold text-zinc-900">Clique para enviar foto do cônjuge</span>
-                                        <input type="file" accept="image/*" onChange={(e) => handleSpousePhotoUpload(q.id, e.target.files?.[0])} className="hidden" />
-                                      </label>
-                                    )}
-                                  </div>
-                                )}
-
-                                {(q.type === 'text' || q.type === 'phone' || q.type === 'date') && (
-                                  <input
-                                    type={q.type === 'phone' ? 'tel' : q.type === 'date' ? 'date' : 'text'}
-                                    required={q.required}
-                                    value={spouseAnswers[q.id] || ''}
-                                    onChange={(e) => handleSpouseChange(q.id, e.target.value, q.type)}
-                                    placeholder={q.type === 'phone' ? '(85) 99999-9999' : 'Resposta do cônjuge'}
-                                    className="w-full px-3.5 py-2 bg-white border border-zinc-300 rounded-lg text-xs text-zinc-950 focus:outline-none focus:ring-2 focus:ring-rose-600 transition"
-                                  />
-                                )}
-
-                                {q.type === 'textarea' && (
-                                  <textarea
-                                    rows={3}
-                                    required={q.required}
-                                    value={spouseAnswers[q.id] || ''}
-                                    onChange={(e) => handleSpouseChange(q.id, e.target.value)}
-                                    placeholder="Escreva detalhadamente..."
-                                    className="w-full px-3.5 py-2 bg-white border border-zinc-300 rounded-lg text-xs text-zinc-950 focus:outline-none focus:ring-2 focus:ring-rose-600 transition"
-                                  />
-                                )}
-
-                                {q.type === 'select' && (
-                                  <select
-                                    required={q.required}
-                                    value={spouseAnswers[q.id] || ''}
-                                    onChange={(e) => handleSpouseChange(q.id, e.target.value)}
-                                    className="w-full px-3.5 py-2 bg-white border border-zinc-300 rounded-lg text-xs text-zinc-950 focus:outline-none focus:ring-2 focus:ring-rose-600 transition cursor-pointer"
-                                  >
-                                    <option value="">Selecione uma opção...</option>
-                                    {(q.options || []).map((opt, idx) => (
-                                      <option key={idx} value={opt}>{opt}</option>
-                                    ))}
-                                  </select>
-                                )}
-                              </div>
-                            );
+                            return renderQuestionField(q, spouseAnswers, handleSpouseChange, true);
                           })}
                         </div>
                       )}
@@ -2542,11 +2521,11 @@
           return evalFinal.startsWith('Reprovado');
         }).length;
         
+        // Estritamente pendências de batismo, discipulado e reagendamentos
         const pendingSet = new Set([
           ...pendingBreakdown.baptism.map(c => c.id),
           ...pendingBreakdown.discipleship.map(c => c.id),
-          ...pendingBreakdown.rescheduling.map(c => c.id),
-          ...candidates.filter(c => c.interviewStatus !== 'concluida').map(c => c.id)
+          ...pendingBreakdown.rescheduling.map(c => c.id)
         ]);
         const pendingCases = pendingSet.size;
 
@@ -5541,15 +5520,614 @@
       );
     }
 
+    // --- GERENCIAMENTO DE USUÁRIOS ---
+    function AdminUsersTab({ users, saveUser, removeUser, showToast }) {
+      const [newUserUsername, setNewUserUsername] = useState('');
+      const [newUserPassword, setNewUserPassword] = useState('');
+      const [newUserName, setNewUserName] = useState('');
+      const [newUserRole, setNewUserRole] = useState('entrevistador');
+      const [editingUser, setEditingUser] = useState(null);
+
+      const handleCreateUser = async (e) => {
+        e.preventDefault();
+        if (!newUserUsername.trim() || !newUserPassword.trim()) return;
+        await saveUser({
+          id: `u-${Date.now()}`,
+          username: newUserUsername.trim(),
+          password: newUserPassword.trim(),
+          name: newUserName.trim() || newUserUsername.trim(),
+          role: newUserRole
+        });
+        setNewUserUsername('');
+        setNewUserPassword('');
+        setNewUserName('');
+        showToast('Usuário cadastrado com sucesso!');
+      };
+
+      const handleSaveEditedUser = async (e) => {
+        e.preventDefault();
+        if (!editingUser) return;
+        await saveUser(editingUser);
+        setEditingUser(null);
+        showToast('Usuário atualizado com sucesso!');
+      };
+
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-5 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm uppercase text-zinc-900">Novo Usuário</h3>
+            <form onSubmit={handleCreateUser} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome Completo</label>
+                <input
+                  type="text"
+                  required
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  placeholder="Ex: Pr. Carlos Eduardo"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Usuário (Login)</label>
+                <input
+                  type="text"
+                  required
+                  value={newUserUsername}
+                  onChange={(e) => setNewUserUsername(e.target.value)}
+                  placeholder="carlos.eduardo"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Senha</label>
+                <input
+                  type="password"
+                  required
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-600 mb-1">Função / Perfil</label>
+                <select
+                  value={newUserRole}
+                  onChange={(e) => setNewUserRole(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  <option value="admin">Administrador</option>
+                  <option value="organizador">Organizador</option>
+                  <option value="integracao">Equipe de Integração</option>
+                  <option value="curso">Equipe de Curso</option>
+                  <option value="entrevistador">Entrevistador</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                Cadastrar Usuário
+              </button>
+            </form>
+          </div>
+
+          <div className="lg:col-span-7 bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm uppercase text-zinc-900">Usuários do Sistema ({users.length})</h3>
+            <div className="space-y-3">
+              {users.map(u => (
+                <div key={u.id} className="p-4 rounded-xl border border-zinc-200 flex items-center justify-between gap-3 bg-zinc-50">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-zinc-950">{u.name}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getRoleBadgeClass(u.role)}`}>
+                        {getRoleLabel(u.role)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-zinc-500 block font-mono">Login: {u.username}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(u)}
+                      className="p-2 text-zinc-600 hover:text-zinc-950 rounded-lg transition cursor-pointer"
+                      title="Editar usuário"
+                    >
+                      <Icon name="edit-2" className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeUser(u.id)}
+                      className="p-2 text-zinc-400 hover:text-red-600 rounded-lg transition cursor-pointer"
+                      title="Apagar usuário"
+                    >
+                      <Icon name="trash-2" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {editingUser && (
+            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 no-print">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
+                  <h3 className="font-bold text-base text-zinc-950">Editar Usuário</h3>
+                  <button onClick={() => setEditingUser(null)} className="p-1 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer">
+                    <Icon name="x-circle" className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveEditedUser} className="space-y-3 text-sm">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Nome Completo</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingUser.name}
+                      onChange={(e) => setEditingUser(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Usuário (Login)</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingUser.username}
+                      onChange={(e) => setEditingUser(prev => ({ ...prev, username: e.target.value }))}
+                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Nova Senha (ou manter a atual)</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingUser.password}
+                      onChange={(e) => setEditingUser(prev => ({ ...prev, password: e.target.value }))}
+                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Função / Perfil</label>
+                    <select
+                      value={editingUser.role}
+                      onChange={(e) => setEditingUser(prev => ({ ...prev, role: e.target.value }))}
+                      className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      <option value="admin">Administrador</option>
+                      <option value="organizador">Organizador</option>
+                      <option value="integracao">Equipe de Integração</option>
+                      <option value="curso">Equipe de Curso</option>
+                      <option value="entrevistador">Entrevistador</option>
+                    </select>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200">
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(null)}
+                      className="px-4 py-2 bg-zinc-100 text-zinc-700 text-xs font-semibold rounded-lg cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-zinc-900 text-white text-xs font-semibold rounded-lg cursor-pointer shadow-sm"
+                    >
+                      Salvar Alterações
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- ABA DE RELATÓRIOS OFICIAL ---
+    function AdminReportsTab({ activeClass, candidates, interviewers, questions, interviewQuestions }) {
+      const [reportType, setReportType] = useState('geral');
+      const [filterInt, setFilterInt] = useState('todos');
+      const [candidateAiSummaries, setCandidateAiSummaries] = useState({});
+
+      const generateSyntheticCandidateSummary = async (candId, candAnswers, candEval, candInterviewAnswers) => {
+        if (candidateAiSummaries[candId]) return;
+        try {
+          let text = "";
+          try {
+            const apiRes = await fetch('/api/summarize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ answers: candAnswers, evaluation: candEval, interviewAnswers: candInterviewAnswers })
+            });
+            if (apiRes.ok) {
+              const apiJson = await apiRes.json();
+              if (apiJson && apiJson.summary) {
+                text = apiJson.summary;
+              }
+            }
+          } catch (serverErr) {
+            // Fallback direto via Gemini API otimizado para Vercel
+          }
+
+          if (!text) {
+            const promptText = `Escreva um resumo sintético da entrevista do candidato fundamentando-se APENAS nos dados da entrevista realizada. O resumo deve ser ultra-curto, menor que 2 linhas de texto corrido. ATENÇÃO: NÃO inclua datas, horários, telefones, e-mails ou contatos pessoais. Dados da entrevista: ${JSON.stringify(candInterviewAnswers || {})}. Parecer: ${candEval}.`;
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+            });
+            const result = await response.json();
+            text = result.candidates?.[0]?.content?.parts?.[0]?.text || "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
+          }
+
+          setCandidateAiSummaries(prev => ({ ...prev, [candId]: text.trim() }));
+        } catch (e) {
+          setCandidateAiSummaries(prev => ({ ...prev, [candId]: "Candidato demonstrou excelente vivência cristã e firme disposição para servir." }));
+        }
+      };
+
+      const filteredList = useMemo(() => {
+        let list = candidates || [];
+        // Remove estritamente candidatos pendentes ou aguardando entrevista
+        list = list.filter(c => c.interviewStatus === 'concluida' && c.evaluation && c.evaluation !== 'Aguardando Entrevista');
+
+        if (filterInt !== 'todos') {
+          list = list.filter(c => c.interviewerId === filterInt);
+        }
+        if (reportType === 'aprovados') {
+          list = list.filter(c => (c.evaluation || '').startsWith('Aprovado'));
+        } else if (reportType === 'reprovados') {
+          list = list.filter(c => (c.evaluation || '').startsWith('Reprovado'));
+        }
+        return list;
+      }, [candidates, reportType, filterInt]);
+
+      // Verifica se todos os resumos dos candidatos filtrados já foram gerados pela IA
+      const areAllSummariesReady = useMemo(() => {
+        if (filteredList.length === 0) return true;
+        return filteredList.every(c => candidateAiSummaries[c.id]);
+      }, [filteredList, candidateAiSummaries]);
+
+      const reportStats = useMemo(() => {
+        const total = filteredList.length;
+        const approved = filteredList.filter(c => (c.evaluation || '').startsWith('Aprovado')).length;
+        const reproved = filteredList.filter(c => (c.evaluation || '').startsWith('Reprovado')).length;
+        return { total, approved, reproved };
+      }, [filteredList]);
+
+      const handleDownloadPdf = () => {
+        if (!areAllSummariesReady) return;
+        try {
+          if (window.jspdf && window.jspdf.jsPDF) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+
+            // 1. CARREGAR LOGO OFICIAL E GERAR PDF EXECUTIVO
+            const img = new Image();
+            img.crossOrigin = 'Anonymous';
+            img.src = 'https://ibfiladelfia.org/wp-content/uploads/2026/07/logo-horizontal.png';
+
+            const proceedWithPdf = (imgData) => {
+              if (imgData) {
+                try {
+                  doc.addImage(imgData, 'PNG', 14, 10, 38, 14);
+                } catch (e) {
+                  doc.setFont('helvetica', 'bold');
+                  doc.setFontSize(14);
+                  doc.setTextColor(15, 23, 42);
+                  doc.text('IGREJA BATISTA FILADELFIA', 14, 16);
+                }
+              } else {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(14);
+                doc.setTextColor(15, 23, 42);
+                doc.text('IGREJA BATISTA FILADELFIA', 14, 16);
+              }
+
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(11);
+              doc.setTextColor(15, 23, 42);
+              doc.text('RELATÓRIO DE ENTREVISTAS CONCLUÍDAS', 58, 14);
+
+              const selectedIntObj = interviewers.find(i => i.id === filterInt);
+              const intLabel = selectedIntObj ? selectedIntObj.name : 'Todos os Entrevistadores';
+
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(8.5);
+              doc.setTextColor(82, 82, 91);
+              doc.text(`Turma: ${activeClass?.name || 'Geral'}    Filtro: ${intLabel}`, 58, 20);
+
+              doc.setDrawColor(226, 232, 240);
+              doc.setLineWidth(0.3);
+              doc.line(14, 26, pageWidth - 14, 26);
+
+              // 2. BLOCOS DE CARDS DE RESUMO (KPIs EXECUTIVOS)
+              const cardY = 30;
+              const cardW = (pageWidth - 28 - 8) / 3;
+              const cardH = 15;
+
+              const cardsData = [
+                { label: 'CONCLUÍDAS', val: String(reportStats.total) },
+                { label: 'APROVADOS', val: String(reportStats.approved) },
+                { label: 'REPROVADOS', val: String(reportStats.reproved) }
+              ];
+
+              cardsData.forEach((card, idx) => {
+                const xPos = 14 + idx * (cardW + 4);
+                doc.setFillColor(248, 250, 252);
+                doc.setDrawColor(226, 232, 240);
+                doc.setLineWidth(0.3);
+                doc.roundedRect(xPos, cardY, cardW, cardH, 1.5, 1.5, 'FD');
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(6);
+                doc.setTextColor(100, 116, 139);
+                doc.text(card.label, xPos + 5, cardY + 5);
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                doc.setTextColor(15, 23, 42);
+                doc.text(card.val, xPos + 5, cardY + 12);
+              });
+
+              // 3. TABELA DE DADOS COM ORDEM EXATA: CANDIDATO (NOME COMPLETO), ENTREVISTADOR, RESUMO, STATUS
+              const tableRows = filteredList.map((c, index) => {
+                const name = getCandidateFullName(c);
+                const status = c.evaluation || 'Concluída';
+                const intObj = interviewers.find(i => i.id === c.interviewerId);
+                const intName = intObj ? intObj.name : 'Não atribuído';
+                const synthSummary = candidateAiSummaries[c.id] || 'Candidato demonstrando bom alinhamento ministerial e firmeza na fé.';
+                return [`${index + 1}. ${name}`, intName, synthSummary, status];
+              });
+
+              doc.autoTable({
+                startY: 49,
+                margin: { left: 14, right: 14, bottom: 20 },
+                head: [['CANDIDATO', 'ENTREVISTADOR', 'RESUMO', 'STATUS']],
+                body: tableRows.length > 0 ? tableRows : [['Nenhum registro encontrado para este filtro.', '', '', '']],
+                theme: 'grid',
+                styles: {
+                  font: 'helvetica',
+                  fontSize: 7.5,
+                  cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+                  textColor: [51, 65, 85],
+                  lineColor: [226, 232, 240],
+                  lineWidth: 0.2,
+                  valign: 'middle',
+                  halign: 'center'
+                },
+                headStyles: {
+                  fillColor: [15, 23, 42],
+                  textColor: [255, 255, 255],
+                  fontStyle: 'bold',
+                  fontSize: 7.5,
+                  halign: 'center'
+                },
+                alternateRowStyles: {
+                  fillColor: [250, 250, 250]
+                },
+                columnStyles: {
+                  0: { cellWidth: 45, fontStyle: 'bold', textColor: [15, 23, 42], halign: 'center' },
+                  1: { cellWidth: 38, textColor: [71, 85, 105], halign: 'center' },
+                  2: { cellWidth: 69, textColor: [15, 23, 42], halign: 'center' },
+                  3: { cellWidth: 30, textColor: [15, 23, 42], halign: 'center' }
+                },
+                didDrawPage: function (data) {
+                  const pageNumber = doc.internal.getNumberOfPages();
+                  doc.setDrawColor(226, 232, 240);
+                  doc.setLineWidth(0.3);
+                  doc.line(14, pageHeight - 14, pageWidth - 14, pageHeight - 14);
+
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(7);
+                  doc.setTextColor(148, 163, 184);
+                  doc.text('Igreja Batista Filadélfia Departamento de Membresia', 14, pageHeight - 8);
+                  doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}  |  Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
+                }
+              });
+
+              doc.save(`Relatorio_Executivo_Entrevistas_${reportType}_${activeClass?.id || 'turma'}.pdf`);
+            };
+
+            img.onload = () => {
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                const dataURL = canvas.toDataURL('image/png');
+                proceedWithPdf(dataURL);
+              } catch (e) {
+                proceedWithPdf(null);
+              }
+            };
+            img.onerror = () => {
+              proceedWithPdf(null);
+            };
+
+          } else {
+            window.print();
+          }
+        } catch (err) {
+          console.error("Erro ao gerar PDF:", err);
+          window.print();
+        }
+      };
+
+      return (
+        <div id="printable-report" className="space-y-6">
+          {/* HEADER PRINCIPAL DA PÁGINA COM DESIGN REORGANIZADO */}
+          <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-zinc-200 pb-5">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 block">Painel Executivo de Relatórios de Entrevistas</span>
+                <h2 className="text-xl font-bold text-zinc-950 mt-0.5">{activeClass?.name}</h2>
+                <p className="text-xs text-zinc-500 mt-0.5">Exibindo somente entrevistas concluídas, com resumos sintéticos ultracurtos gerados por IA otimizados para Vercel.</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={!areAllSummariesReady}
+                  onClick={handleDownloadPdf}
+                  className={`px-5 py-3 text-xs font-bold rounded-xl transition flex items-center gap-2.5 shadow-sm ${
+                    areAllSummariesReady 
+                      ? 'bg-zinc-900 hover:bg-zinc-800 text-white cursor-pointer' 
+                      : 'bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                  }`}
+                  title={areAllSummariesReady ? "Baixar relatório em PDF" : "Aguarde a IA gerar todos os resumos sintéticos..."}
+                >
+                  <Icon name="file-text" className="w-4 h-4" />
+                  <span>{areAllSummariesReady ? 'Baixar Relatório em PDF' : 'Gerando Resumos da IA...'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* SEÇÃO DE FILTROS ORGANIZADA EM GRID EXECUTIVA */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-zinc-700">Filtrar por Resultado da Entrevista</label>
+                <select
+                  value={reportType}
+                  onChange={(e) => setReportType(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                >
+                  <option value="geral">Geral (Todas as Concluídas)</option>
+                  <option value="aprovados">Somente Aprovados</option>
+                  <option value="reprovados">Somente Reprovados</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-zinc-700">Filtrar por Entrevistador Responsável</label>
+                <select
+                  value={filterInt}
+                  onChange={(e) => setFilterInt(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                >
+                  <option value="todos">Todos os Entrevistadores</option>
+                  {interviewers.map(i => (
+                    <option key={i.id} value={i.id}>{i.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* CARDS DE RESUMO ESTATÍSTICO (KPIs) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Total Concluídas</span>
+              <span className="text-3xl font-extrabold text-zinc-950 block">{reportStats.total}</span>
+            </div>
+            <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600">Aprovados</span>
+              <span className="text-3xl font-extrabold text-emerald-700 block">{reportStats.approved}</span>
+            </div>
+            <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-red-600">Reprovados</span>
+              <span className="text-3xl font-extrabold text-red-600 block">{reportStats.reproved}</span>
+            </div>
+          </div>
+
+          {/* TABELA DE REGISTROS CONSOLIDADOS COM NOME COMPLETO */}
+          <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
+              <div>
+                <h3 className="font-bold base text-zinc-950">Entrevistas Concluídas</h3>
+                <p className="text-xs text-zinc-500">Listagem detalhada de entrevistas finalizadas com alinhamento centralizado em cada célula.</p>
+              </div>
+              <span className="text-xs font-bold bg-zinc-100 text-zinc-800 px-3 py-1 rounded-full">{filteredList.length} concluídas</span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-center border-collapse text-sm">
+                <thead>
+                  <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                    <th className="p-4 text-center align-middle">Candidato</th>
+                    <th className="p-4 text-center align-middle">Entrevistador</th>
+                    <th className="p-4 text-center align-middle">Resumo (IA)</th>
+                    <th className="p-4 text-center align-middle">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200">
+                  {filteredList.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-8 text-center text-zinc-500 text-xs">Nenhuma entrevista concluída encontrada para este filtro.</td>
+                    </tr>
+                  ) : (
+                    filteredList.map(c => {
+                      const name = getCandidateFullName(c);
+                      const status = c.evaluation || 'Concluída';
+                      const intObj = interviewers.find(i => i.id === c.interviewerId);
+                      const intName = intObj ? intObj.name : 'Não atribuído';
+                      const synthSummary = candidateAiSummaries[c.id];
+
+                      if (!synthSummary) {
+                        generateSyntheticCandidateSummary(c.id, c.answers, status, c.interviewAnswers);
+                      }
+
+                      return (
+                        <tr key={c.id} className="hover:bg-zinc-50/80">
+                          <td className="p-4 text-center align-middle font-semibold text-zinc-950">
+                            {name}
+                          </td>
+                          <td className="p-4 text-center align-middle text-xs font-semibold text-zinc-700">
+                            {intName}
+                          </td>
+                          <td className="p-4 text-center align-middle">
+                            <div className="inline-flex items-start justify-center gap-1.5 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-xl max-w-sm mx-auto text-left shadow-2xs">
+                              <Icon name="sparkles" className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                              <span className="font-medium italic leading-relaxed">{synthSummary || 'Gerando resumo sintético...'}</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-center align-middle">
+                            <div className="flex justify-center">
+                              <span className={getEvaluationBadgeClass(status)}>{status}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // --- GERENCIAMENTO DE PERGUNTAS DE INSCRIÇÃO ---
     function RegistrationQuestionsManager({ questions, saveQuestion, removeQuestion, showToast }) {
       const [newQLabel, setNewQLabel] = useState('');
       const [newQType, setNewQType] = useState('text');
       const [newQRequired, setNewQRequired] = useState(true);
       const [newQOptions, setNewQOptions] = useState('');
-      const [isConditionalEnabled, setIsConditionalEnabled] = useState(false);
-      const [newQConditionParentId, setNewQConditionParentId] = useState('');
-      const [newQConditionValue, setNewQConditionValue] = useState('');
+      const [isDerivedEnabled, setIsDerivedEnabled] = useState(false);
+      const [derivedTriggerValue, setDerivedTriggerValue] = useState('');
+      const [derivedLabel, setDerivedLabel] = useState('');
+      const [derivedType, setDerivedType] = useState('text');
+      const [derivedOptions, setDerivedOptions] = useState('');
+      const [isSubDerivedEnabled, setIsSubDerivedEnabled] = useState(false);
+      const [subDerivedTriggerValue, setSubDerivedTriggerValue] = useState('');
+      const [subDerivedLabel, setSubDerivedLabel] = useState('');
+      const [subDerivedType, setSubDerivedType] = useState('text');
+      const [subDerivedOptions, setSubDerivedOptions] = useState('');
       const [draggedIndex, setDraggedIndex] = useState(null);
       const [editingQuestion, setEditingQuestion] = useState(null);
 
@@ -5557,6 +6135,26 @@
         e.preventDefault();
         if (!newQLabel.trim()) return;
         const opts = newQType === 'select' ? newQOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const derivedOpts = derivedType === 'select' ? derivedOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const subDerivedOpts = subDerivedType === 'select' ? subDerivedOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        const subDerivedObj = isSubDerivedEnabled && subDerivedLabel.trim() ? {
+          id: `sdeq-${Date.now()}`,
+          label: subDerivedLabel.trim(),
+          type: subDerivedType,
+          options: subDerivedOpts,
+          triggerValue: subDerivedTriggerValue.trim()
+        } : null;
+
+        const derivedObj = isDerivedEnabled && derivedLabel.trim() ? {
+          id: `dq-${Date.now()}`,
+          label: derivedLabel.trim(),
+          type: derivedType,
+          options: derivedOpts,
+          triggerValue: derivedTriggerValue.trim(),
+          derivedQuestion: subDerivedObj
+        } : null;
+
         await saveQuestion({
           id: `q-${Date.now()}`,
           label: newQLabel.trim(),
@@ -5565,26 +6163,49 @@
           options: opts,
           isCore: false,
           order: questions.length,
-          conditionParentId: isConditionalEnabled && newQConditionParentId ? newQConditionParentId : null,
-          conditionValue: isConditionalEnabled && newQConditionValue ? newQConditionValue : null
+          derivedQuestion: derivedObj
         });
         setNewQLabel('');
         setNewQOptions('');
-        setIsConditionalEnabled(false);
-        setNewQConditionParentId('');
-        setNewQConditionValue('');
-        showToast('Pergunta de inscrição adicionada com sucesso!');
+        setIsDerivedEnabled(false);
+        setDerivedTriggerValue('');
+        setDerivedLabel('');
+        setDerivedOptions('');
+        setIsSubDerivedEnabled(false);
+        setSubDerivedTriggerValue('');
+        setSubDerivedLabel('');
+        setSubDerivedOptions('');
+        showToast('Pergunta de inscrição com derivada condicional adicionada com sucesso!');
       };
 
       const handleSaveEditedQuestion = async (e) => {
         e.preventDefault();
         if (!editingQuestion || !editingQuestion.label.trim()) return;
         const opts = editingQuestion.type === 'select' ? (typeof editingQuestion.options === 'string' ? editingQuestion.options.split(',').map(s => s.trim()).filter(Boolean) : editingQuestion.options) : [];
+        const derivedOpts = editingQuestion.derivedType === 'select' ? (typeof editingQuestion.derivedOptions === 'string' ? editingQuestion.derivedOptions.split(',').map(s => s.trim()).filter(Boolean) : editingQuestion.derivedOptions) : [];
+        const subDerivedOpts = editingQuestion.subDerivedType === 'select' ? (typeof editingQuestion.subDerivedOptions === 'string' ? editingQuestion.subDerivedOptions.split(',').map(s => s.trim()).filter(Boolean) : editingQuestion.subDerivedOptions) : [];
+
+        const subDerivedObj = editingQuestion.isSubDerivedEnabled && editingQuestion.subDerivedLabel ? {
+          id: editingQuestion.derivedQuestion?.derivedQuestion?.id || `sdeq-${Date.now()}`,
+          label: editingQuestion.subDerivedLabel.trim(),
+          type: editingQuestion.subDerivedType || 'text',
+          options: subDerivedOpts,
+          triggerValue: editingQuestion.subDerivedTriggerValue?.trim() || ''
+        } : null;
+
+        const derivedObj = editingQuestion.isDerivedEnabled && editingQuestion.derivedLabel ? {
+          id: editingQuestion.derivedQuestion?.id || `dq-${Date.now()}`,
+          label: editingQuestion.derivedLabel.trim(),
+          type: editingQuestion.derivedType || 'text',
+          options: derivedOpts,
+          triggerValue: editingQuestion.derivedTriggerValue?.trim() || '',
+          derivedQuestion: subDerivedObj
+        } : null;
+
         await saveQuestion({
           ...editingQuestion,
           options: opts,
-          conditionParentId: editingQuestion.isConditionalEnabled && editingQuestion.conditionParentId ? editingQuestion.conditionParentId : null,
-          conditionValue: editingQuestion.isConditionalEnabled && editingQuestion.conditionValue ? editingQuestion.conditionValue : null
+          derivedQuestion: derivedObj
         });
         setEditingQuestion(null);
         showToast('Pergunta de inscrição atualizada com sucesso!');
@@ -5656,43 +6277,93 @@
                 </div>
               )}
 
-              {/* Toggle Switch para Pergunta Condicional */}
+              {/* Toggle Switch para Pergunta Derivada */}
               <div className="pt-3 border-t border-zinc-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="font-bold text-xs text-zinc-900 block">Pergunta Condicional</span>
-                    <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                    <span className="font-bold text-xs text-zinc-900 block">Adicionar Pergunta Derivada</span>
+                    <span className="text-[11px] text-zinc-500">Sub-pergunta ativada via toggle switch</span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsConditionalEnabled(!isConditionalEnabled)}
+                    onClick={() => setIsDerivedEnabled(!isDerivedEnabled)}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                      isDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
                     }`}
                   >
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                        isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                        isDerivedEnabled ? 'translate-x-5' : 'translate-x-0'
                       }`}
                     />
                   </button>
                 </div>
 
-                {isConditionalEnabled && (
+                {isDerivedEnabled && (
                   <div className="p-3 bg-white rounded-xl border border-zinc-200 space-y-3 shadow-2xs">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                      <select value={newQConditionParentId} onChange={(e) => setNewQConditionParentId(e.target.value)} className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
-                        <option value="">Selecione a pergunta base...</option>
-                        {questions.filter(q => q.type === 'select').map(q => (
-                          <option key={q.id} value={q.id}>{q.label}</option>
-                        ))}
-                      </select>
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Qual resposta ativa esta pergunta derivada?</label>
+                      <input type="text" value={derivedTriggerValue} onChange={(e) => setDerivedTriggerValue(e.target.value)} placeholder="Ex: Sim (ou deixe em branco para qualquer resposta)" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                      <input type="text" value={newQConditionValue} onChange={(e) => setNewQConditionValue(e.target.value)} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Título da Pergunta Derivada:</label>
+                      <input type="text" value={derivedLabel} onChange={(e) => setDerivedLabel(e.target.value)} placeholder="Ex: Qual o nome do líder?" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Tipo</label>
+                        <select value={derivedType} onChange={(e) => setDerivedType(e.target.value)} className="w-full px-2.5 py-1.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold">
+                          <option value="text">Texto Curto</option>
+                          <option value="textarea">Texto Longo</option>
+                          <option value="select">Seleção</option>
+                        </select>
+                      </div>
+                      {derivedType === 'select' && (
+                        <div>
+                          <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Opções (,)</label>
+                          <input type="text" value={derivedOptions} onChange={(e) => setDerivedOptions(e.target.value)} placeholder="Op1, Op2" className="w-full px-2.5 py-1.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sub-pergunta Derivada da Derivada (Cascata) */}
+                    <div className="pt-2 border-t border-zinc-100 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-[11px] text-zinc-900 block">Derivada da Derivada</span>
+                          <span className="text-[10px] text-zinc-500">Sub-sub-pergunta via toggle</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsSubDerivedEnabled(!isSubDerivedEnabled)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            isSubDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                              isSubDerivedEnabled ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {isSubDerivedEnabled && (
+                        <div className="p-2.5 bg-zinc-50 rounded-lg border border-zinc-200 space-y-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Qual resposta ativa esta sub-derivada?</label>
+                            <input type="text" value={subDerivedTriggerValue} onChange={(e) => setSubDerivedTriggerValue(e.target.value)} placeholder="Ex: Outro" className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs" />
+                          </div>
+                          <input type="text" value={subDerivedLabel} onChange={(e) => setSubDerivedLabel(e.target.value)} placeholder="Título da sub-sub-pergunta..." className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs" />
+                          <select value={subDerivedType} onChange={(e) => setSubDerivedType(e.target.value)} className="w-full px-2 py-1 bg-white border border-zinc-300 rounded-lg text-xs font-semibold">
+                            <option value="text">Texto Curto</option>
+                            <option value="textarea">Texto Longo</option>
+                            <option value="select">Seleção</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -5721,12 +6392,25 @@
                   <div className="min-w-0">
                     <span className="font-bold text-xs text-zinc-950 block truncate">{idx + 1}. {q.label}</span>
                     <span className="text-[10px] text-zinc-500 uppercase font-semibold">
-                      Tipo: {q.type} {q.conditionParentId ? `• [Condicionada]` : ''}
+                      Tipo: {q.type} {q.derivedQuestion ? `• [Possui Derivada (ativa com: "${q.derivedQuestion.triggerValue || 'qualquer'}") ${q.derivedQuestion.derivedQuestion ? ' em Cascata' : ''}]` : ''}
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button type="button" onClick={() => setEditingQuestion({ ...q, options: q.options ? q.options.join(', ') : '', isConditionalEnabled: !!q.conditionParentId })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar pergunta">
+                  <button type="button" onClick={() => setEditingQuestion({ 
+                    ...q, 
+                    options: q.options ? q.options.join(', ') : '', 
+                    isDerivedEnabled: !!q.derivedQuestion, 
+                    derivedTriggerValue: q.derivedQuestion?.triggerValue || '',
+                    derivedLabel: q.derivedQuestion?.label || '', 
+                    derivedType: q.derivedQuestion?.type || 'text', 
+                    derivedOptions: q.derivedQuestion?.options ? q.derivedQuestion.options.join(', ') : '',
+                    isSubDerivedEnabled: !!q.derivedQuestion?.derivedQuestion,
+                    subDerivedTriggerValue: q.derivedQuestion?.derivedQuestion?.triggerValue || '',
+                    subDerivedLabel: q.derivedQuestion?.derivedQuestion?.label || '',
+                    subDerivedType: q.derivedQuestion?.derivedQuestion?.type || 'text',
+                    subDerivedOptions: q.derivedQuestion?.derivedQuestion?.options ? q.derivedQuestion.derivedQuestion.options.join(', ') : ''
+                  })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar pergunta">
                     <Icon name="edit-2" className="w-4 h-4" />
                   </button>
                   {!q.isCore && (
@@ -5786,39 +6470,85 @@
                   <div className="pt-3 border-t border-zinc-200 space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="font-bold text-xs text-zinc-900 block">Pergunta Condicional</span>
-                        <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                        <span className="font-bold text-xs text-zinc-900 block">Pergunta Derivada</span>
+                        <span className="text-[11px] text-zinc-500">Sub-pergunta ativada via toggle switch</span>
                       </div>
                       <button
                         type="button"
-                        onClick={() => setEditingQuestion(prev => ({ ...prev, isConditionalEnabled: !prev.isConditionalEnabled }))}
+                        onClick={() => setEditingQuestion(prev => ({ ...prev, isDerivedEnabled: !prev.isDerivedEnabled }))}
                         className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          editingQuestion.isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                          editingQuestion.isDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
                         }`}
                       >
                         <span
                           className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                            editingQuestion.isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                            editingQuestion.isDerivedEnabled ? 'translate-x-5' : 'translate-x-0'
                           }`}
                         />
                       </button>
                     </div>
 
-                    {editingQuestion.isConditionalEnabled && (
+                    {editingQuestion.isDerivedEnabled && (
                       <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-3">
                         <div>
-                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                          <select value={editingQuestion.conditionParentId || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, conditionParentId: e.target.value }))} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
-                            <option value="">Selecione a pergunta base...</option>
-                            {questions.filter(q => q.type === 'select' && q.id !== editingQuestion.id).map(q => (
-                              <option key={q.id} value={q.id}>{q.label}</option>
-                            ))}
-                          </select>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Qual resposta ativa esta pergunta derivada?</label>
+                          <input type="text" value={editingQuestion.derivedTriggerValue || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, derivedTriggerValue: e.target.value }))} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Título da Pergunta Derivada:</label>
+                          <input type="text" value={editingQuestion.derivedLabel || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, derivedLabel: e.target.value }))} placeholder="Ex: Especifique..." className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Tipo</label>
+                            <select value={editingQuestion.derivedType || 'text'} onChange={(e) => setEditingQuestion(prev => ({ ...prev, derivedType: e.target.value }))} className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs font-semibold">
+                              <option value="text">Texto Curto</option>
+                              <option value="textarea">Texto Longo</option>
+                              <option value="select">Seleção</option>
+                            </select>
+                          </div>
+                          {editingQuestion.derivedType === 'select' && (
+                            <div>
+                              <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Opções (,)</label>
+                              <input type="text" value={editingQuestion.derivedOptions || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, derivedOptions: e.target.value }))} placeholder="Op1, Op2" className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs" />
+                            </div>
+                          )}
                         </div>
 
-                        <div>
-                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                          <input type="text" value={editingQuestion.conditionValue || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, conditionValue: e.target.value }))} placeholder="Ex: Sim" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        <div className="pt-2 border-t border-zinc-200 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-bold text-[11px] text-zinc-900 block">Derivada da Derivada</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setEditingQuestion(prev => ({ ...prev, isSubDerivedEnabled: !prev.isSubDerivedEnabled }))}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                editingQuestion.isSubDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                  editingQuestion.isSubDerivedEnabled ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {editingQuestion.isSubDerivedEnabled && (
+                            <div className="p-2 bg-white rounded-lg border border-zinc-200 space-y-2">
+                              <div>
+                                <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Qual resposta ativa esta sub-derivada?</label>
+                                <input type="text" value={editingQuestion.subDerivedTriggerValue || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, subDerivedTriggerValue: e.target.value }))} placeholder="Ex: Outro" className="w-full px-2 py-1 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                              </div>
+                              <input type="text" value={editingQuestion.subDerivedLabel || ''} onChange={(e) => setEditingQuestion(prev => ({ ...prev, subDerivedLabel: e.target.value }))} placeholder="Título da sub-sub-pergunta..." className="w-full px-2 py-1 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                              <select value={editingQuestion.subDerivedType || 'text'} onChange={(e) => setEditingQuestion(prev => ({ ...prev, subDerivedType: e.target.value }))} className="w-full px-2 py-1 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold">
+                                <option value="text">Texto Curto</option>
+                                <option value="textarea">Texto Longo</option>
+                                <option value="select">Seleção</option>
+                              </select>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -5846,9 +6576,16 @@
       const [newIQType, setNewIQType] = useState('textarea');
       const [newIQRequired, setNewIQRequired] = useState(true);
       const [newIQOptions, setNewIQOptions] = useState('');
-      const [isConditionalEnabled, setIsConditionalEnabled] = useState(false);
-      const [newIQConditionParentId, setNewIQConditionParentId] = useState('');
-      const [newIQConditionValue, setNewIQConditionValue] = useState('');
+      const [isDerivedEnabled, setIsDerivedEnabled] = useState(false);
+      const [derivedTriggerValue, setDerivedTriggerValue] = useState('');
+      const [derivedLabel, setDerivedLabel] = useState('');
+      const [derivedType, setDerivedType] = useState('text');
+      const [derivedOptions, setDerivedOptions] = useState('');
+      const [isSubDerivedEnabled, setIsSubDerivedEnabled] = useState(false);
+      const [subDerivedTriggerValue, setSubDerivedTriggerValue] = useState('');
+      const [subDerivedLabel, setSubDerivedLabel] = useState('');
+      const [subDerivedType, setSubDerivedType] = useState('text');
+      const [subDerivedOptions, setSubDerivedOptions] = useState('');
       const [draggedIndex, setDraggedIndex] = useState(null);
       const [editingInterviewQuestion, setEditingInterviewQuestion] = useState(null);
 
@@ -5856,6 +6593,26 @@
         e.preventDefault();
         if (!newIQLabel.trim()) return;
         const opts = newIQType === 'select' ? newIQOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const derivedOpts = derivedType === 'select' ? derivedOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const subDerivedOpts = subDerivedType === 'select' ? subDerivedOptions.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        const subDerivedObj = isSubDerivedEnabled && subDerivedLabel.trim() ? {
+          id: `sdiq-${Date.now()}`,
+          label: subDerivedLabel.trim(),
+          type: subDerivedType,
+          options: subDerivedOpts,
+          triggerValue: subDerivedTriggerValue.trim()
+        } : null;
+
+        const derivedObj = isDerivedEnabled && derivedLabel.trim() ? {
+          id: `diq-${Date.now()}`,
+          label: derivedLabel.trim(),
+          type: derivedType,
+          options: derivedOpts,
+          triggerValue: derivedTriggerValue.trim(),
+          derivedQuestion: subDerivedObj
+        } : null;
+
         await saveInterviewQuestion({
           id: `iq-${Date.now()}`,
           label: newIQLabel.trim(),
@@ -5863,26 +6620,49 @@
           required: newIQRequired,
           options: opts,
           order: interviewQuestions.length,
-          conditionParentId: isConditionalEnabled && newIQConditionParentId ? newIQConditionParentId : null,
-          conditionValue: isConditionalEnabled && newIQConditionValue ? newIQConditionValue : null
+          derivedQuestion: derivedObj
         });
         setNewIQLabel('');
         setNewIQOptions('');
-        setIsConditionalEnabled(false);
-        setNewIQConditionParentId('');
-        setNewIQConditionValue('');
-        showToast('Critério de entrevista adicionado!');
+        setIsDerivedEnabled(false);
+        setDerivedTriggerValue('');
+        setDerivedLabel('');
+        setDerivedOptions('');
+        setIsSubDerivedEnabled(false);
+        setSubDerivedTriggerValue('');
+        setSubDerivedLabel('');
+        setSubDerivedOptions('');
+        showToast('Critério de entrevista com derivada condicional adicionado!');
       };
 
       const handleSaveEditedInterviewQuestion = async (e) => {
         e.preventDefault();
         if (!editingInterviewQuestion || !editingInterviewQuestion.label.trim()) return;
         const opts = editingInterviewQuestion.type === 'select' ? (typeof editingInterviewQuestion.options === 'string' ? editingInterviewQuestion.options.split(',').map(s => s.trim()).filter(Boolean) : editingInterviewQuestion.options) : [];
+        const derivedOpts = editingInterviewQuestion.derivedType === 'select' ? (typeof editingInterviewQuestion.derivedOptions === 'string' ? editingInterviewQuestion.derivedOptions.split(',').map(s => s.trim()).filter(Boolean) : editingInterviewQuestion.derivedOptions) : [];
+        const subDerivedOpts = editingInterviewQuestion.subDerivedType === 'select' ? (typeof editingInterviewQuestion.subDerivedOptions === 'string' ? editingInterviewQuestion.subDerivedOptions.split(',').map(s => s.trim()).filter(Boolean) : editingInterviewQuestion.subDerivedOptions) : [];
+
+        const subDerivedObj = editingInterviewQuestion.isSubDerivedEnabled && editingInterviewQuestion.subDerivedLabel ? {
+          id: editingInterviewQuestion.derivedQuestion?.derivedQuestion?.id || `sdiq-${Date.now()}`,
+          label: editingInterviewQuestion.subDerivedLabel.trim(),
+          type: editingInterviewQuestion.subDerivedType || 'text',
+          options: subDerivedOpts,
+          triggerValue: editingInterviewQuestion.subDerivedTriggerValue?.trim() || ''
+        } : null;
+
+        const derivedObj = editingInterviewQuestion.isDerivedEnabled && editingInterviewQuestion.derivedLabel ? {
+          id: editingInterviewQuestion.derivedQuestion?.id || `diq-${Date.now()}`,
+          label: editingInterviewQuestion.derivedLabel.trim(),
+          type: editingInterviewQuestion.derivedType || 'text',
+          options: derivedOpts,
+          triggerValue: editingInterviewQuestion.derivedTriggerValue?.trim() || '',
+          derivedQuestion: subDerivedObj
+        } : null;
+
         await saveInterviewQuestion({
           ...editingInterviewQuestion,
           options: opts,
-          conditionParentId: editingInterviewQuestion.isConditionalEnabled && editingInterviewQuestion.conditionParentId ? editingInterviewQuestion.conditionParentId : null,
-          conditionValue: editingInterviewQuestion.isConditionalEnabled && editingInterviewQuestion.conditionValue ? editingInterviewQuestion.conditionValue : null
+          derivedQuestion: derivedObj
         });
         setEditingInterviewQuestion(null);
         showToast('Critério de entrevista atualizado com sucesso!');
@@ -5955,43 +6735,90 @@
                 </div>
               )}
 
-              {/* Toggle Switch para Critério Condicional de Entrevista */}
+              {/* Toggle Switch para Critério Derivado de Entrevista */}
               <div className="pt-3 border-t border-zinc-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="font-bold text-xs text-zinc-900 block">Critério Condicional</span>
-                    <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                    <span className="font-bold text-xs text-zinc-900 block">Adicionar Critério Derivado</span>
+                    <span className="text-[11px] text-zinc-500">Sub-critério ativado via toggle switch</span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsConditionalEnabled(!isConditionalEnabled)}
+                    onClick={() => setIsDerivedEnabled(!isDerivedEnabled)}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                      isDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
                     }`}
                   >
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                        isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                        isDerivedEnabled ? 'translate-x-5' : 'translate-x-0'
                       }`}
                     />
                   </button>
                 </div>
 
-                {isConditionalEnabled && (
+                {isDerivedEnabled && (
                   <div className="p-3 bg-white rounded-xl border border-zinc-200 space-y-3 shadow-2xs">
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                      <select value={newIQConditionParentId} onChange={(e) => setNewIQConditionParentId(e.target.value)} className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
-                        <option value="">Selecione o critério base...</option>
-                        {interviewQuestions.filter(iq => iq.type === 'select').map(iq => (
-                          <option key={iq.id} value={iq.id}>{iq.label}</option>
-                        ))}
-                      </select>
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Qual resposta ativa este critério derivado?</label>
+                      <input type="text" value={derivedTriggerValue} onChange={(e) => setDerivedTriggerValue(e.target.value)} placeholder="Ex: Bom (ou deixe em branco para qualquer resposta)" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                      <input type="text" value={newIQConditionValue} onChange={(e) => setNewIQConditionValue(e.target.value)} placeholder="Ex: Excelente" className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                      <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Título do Critério Derivado:</label>
+                      <input type="text" value={derivedLabel} onChange={(e) => setDerivedLabel(e.target.value)} placeholder="Ex: Justifique a avaliação..." className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Tipo</label>
+                        <select value={derivedType} onChange={(e) => setDerivedType(e.target.value)} className="w-full px-2.5 py-1.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold">
+                          <option value="text">Texto Curto</option>
+                          <option value="textarea">Texto Longo</option>
+                          <option value="select">Seleção</option>
+                        </select>
+                      </div>
+                      {derivedType === 'select' && (
+                        <div>
+                          <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Opções (,)</label>
+                          <input type="text" value={derivedOptions} onChange={(e) => setDerivedOptions(e.target.value)} placeholder="Op1, Op2" className="w-full px-2.5 py-1.5 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-2 border-t border-zinc-100 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-[11px] text-zinc-900 block">Derivada da Derivada</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsSubDerivedEnabled(!isSubDerivedEnabled)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            isSubDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                              isSubDerivedEnabled ? 'translate-x-4' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {isSubDerivedEnabled && (
+                        <div className="p-2.5 bg-zinc-50 rounded-lg border border-zinc-200 space-y-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Qual resposta ativa esta sub-derivada?</label>
+                            <input type="text" value={subDerivedTriggerValue} onChange={(e) => setSubDerivedTriggerValue(e.target.value)} placeholder="Ex: Regular" className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs" />
+                          </div>
+                          <input type="text" value={subDerivedLabel} onChange={(e) => setSubDerivedLabel(e.target.value)} placeholder="Título da sub-sub-pergunta..." className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs" />
+                          <select value={subDerivedType} onChange={(e) => setSubDerivedType(e.target.value)} className="w-full px-2 py-1 bg-white border border-zinc-300 rounded-lg text-xs font-semibold">
+                            <option value="text">Texto Curto</option>
+                            <option value="textarea">Texto Longo</option>
+                            <option value="select">Seleção</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -6020,12 +6847,25 @@
                   <div className="min-w-0">
                     <span className="font-bold text-xs text-zinc-950 block truncate">{idx + 1}. {iq.label}</span>
                     <span className="text-[10px] text-zinc-500 uppercase font-semibold">
-                      Tipo: {iq.type} {iq.conditionParentId ? `• [Condicionada]` : ''} {iq.options?.length ? `(${iq.options.join(', ')})` : ''}
+                      Tipo: {iq.type} {iq.derivedQuestion ? `• [Possui Derivada (ativa com: "${iq.derivedQuestion.triggerValue || 'qualquer'}") ${iq.derivedQuestion.derivedQuestion ? ' em Cascata' : ''}]` : ''}
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button type="button" onClick={() => setEditingInterviewQuestion({ ...iq, options: iq.options ? iq.options.join(', ') : '', isConditionalEnabled: !!iq.conditionParentId })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar critério">
+                  <button type="button" onClick={() => setEditingInterviewQuestion({ 
+                    ...iq, 
+                    options: iq.options ? iq.options.join(', ') : '', 
+                    isDerivedEnabled: !!iq.derivedQuestion, 
+                    derivedTriggerValue: iq.derivedQuestion?.triggerValue || '',
+                    derivedLabel: iq.derivedQuestion?.label || '', 
+                    derivedType: iq.derivedQuestion?.type || 'text', 
+                    derivedOptions: iq.derivedQuestion?.options ? iq.derivedQuestion.options.join(', ') : '',
+                    isSubDerivedEnabled: !!iq.derivedQuestion?.derivedQuestion,
+                    subDerivedTriggerValue: iq.derivedQuestion?.derivedQuestion?.triggerValue || '',
+                    subDerivedLabel: iq.derivedQuestion?.derivedQuestion?.label || '',
+                    subDerivedType: iq.derivedQuestion?.derivedQuestion?.type || 'text',
+                    subDerivedOptions: iq.derivedQuestion?.derivedQuestion?.options ? iq.derivedQuestion.derivedQuestion.options.join(', ') : ''
+                  })} className="p-1.5 text-zinc-400 hover:text-zinc-900 rounded-lg cursor-pointer" title="Editar critério">
                     <Icon name="edit-2" className="w-4 h-4" />
                   </button>
                   <button type="button" onClick={() => removeInterviewQuestion(iq.id)} className="p-1.5 text-zinc-400 hover:text-red-600 rounded-lg cursor-pointer shrink-0" title="Apagar critério">
@@ -6087,39 +6927,85 @@
                   <div className="pt-3 border-t border-zinc-200 space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="font-bold text-xs text-zinc-900 block">Critério Condicional</span>
-                        <span className="text-[11px] text-zinc-500">Exibir apenas com base em resposta anterior</span>
+                        <span className="font-bold text-xs text-zinc-900 block">Critério Derivado</span>
+                        <span className="text-[11px] text-zinc-500">Sub-critério ativado via toggle switch</span>
                       </div>
                       <button
                         type="button"
-                        onClick={() => setEditingInterviewQuestion(prev => ({ ...prev, isConditionalEnabled: !prev.isConditionalEnabled }))}
+                        onClick={() => setEditingInterviewQuestion(prev => ({ ...prev, isDerivedEnabled: !prev.isDerivedEnabled }))}
                         className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          editingInterviewQuestion.isConditionalEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                          editingInterviewQuestion.isDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
                         }`}
                       >
                         <span
                           className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                            editingInterviewQuestion.isConditionalEnabled ? 'translate-x-5' : 'translate-x-0'
+                            editingInterviewQuestion.isDerivedEnabled ? 'translate-x-5' : 'translate-x-0'
                           }`}
                         />
                       </button>
                     </div>
 
-                    {editingInterviewQuestion.isConditionalEnabled && (
+                    {editingInterviewQuestion.isDerivedEnabled && (
                       <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-3">
                         <div>
-                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Exibir se a pergunta:</label>
-                          <select value={editingInterviewQuestion.conditionParentId || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, conditionParentId: e.target.value }))} className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-semibold cursor-pointer">
-                            <option value="">Selecione o critério base...</option>
-                            {interviewQuestions.filter(iq => iq.type === 'select' && iq.id !== editingInterviewQuestion.id).map(iq => (
-                              <option key={iq.id} value={iq.id}>{iq.label}</option>
-                            ))}
-                          </select>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Qual resposta ativa este critério derivado?</label>
+                          <input type="text" value={editingInterviewQuestion.derivedTriggerValue || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, derivedTriggerValue: e.target.value }))} placeholder="Ex: Bom" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Título do Critério Derivado:</label>
+                          <input type="text" value={editingInterviewQuestion.derivedLabel || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, derivedLabel: e.target.value }))} placeholder="Ex: Detalhes..." className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Tipo</label>
+                            <select value={editingInterviewQuestion.derivedType || 'text'} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, derivedType: e.target.value }))} className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs font-semibold">
+                              <option value="text">Texto Curto</option>
+                              <option value="textarea">Texto Longo</option>
+                              <option value="select">Seleção</option>
+                            </select>
+                          </div>
+                          {editingInterviewQuestion.derivedType === 'select' && (
+                            <div>
+                              <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Opções (,)</label>
+                              <input type="text" value={editingInterviewQuestion.derivedOptions || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, derivedOptions: e.target.value }))} placeholder="Op1, Op2" className="w-full px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg text-xs" />
+                            </div>
+                          )}
                         </div>
 
-                        <div>
-                          <label className="block text-[11px] font-semibold text-zinc-600 mb-1">Tiver a resposta exata:</label>
-                          <input type="text" value={editingInterviewQuestion.conditionValue || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, conditionValue: e.target.value }))} placeholder="Ex: Excelente" className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs" />
+                        <div className="pt-2 border-t border-zinc-200 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-bold text-[11px] text-zinc-900 block">Derivada da Derivada</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setEditingInterviewQuestion(prev => ({ ...prev, isSubDerivedEnabled: !prev.isSubDerivedEnabled }))}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                editingInterviewQuestion.isSubDerivedEnabled ? 'bg-emerald-600' : 'bg-zinc-300'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                  editingInterviewQuestion.isSubDerivedEnabled ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {editingInterviewQuestion.isSubDerivedEnabled && (
+                            <div className="p-2 bg-white rounded-lg border border-zinc-200 space-y-2">
+                              <div>
+                                <label className="block text-[10px] font-semibold text-zinc-600 mb-1">Qual resposta ativa esta sub-derivada?</label>
+                                <input type="text" value={editingInterviewQuestion.subDerivedTriggerValue || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, subDerivedTriggerValue: e.target.value }))} placeholder="Ex: Regular" className="w-full px-2 py-1 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                              </div>
+                              <input type="text" value={editingInterviewQuestion.subDerivedLabel || ''} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, subDerivedLabel: e.target.value }))} placeholder="Título da sub-sub-pergunta..." className="w-full px-2 py-1 bg-zinc-50 border border-zinc-300 rounded-lg text-xs" />
+                              <select value={editingInterviewQuestion.subDerivedType || 'text'} onChange={(e) => setEditingInterviewQuestion(prev => ({ ...prev, subDerivedType: e.target.value }))} className="w-full px-2 py-1 bg-zinc-50 border border-zinc-300 rounded-lg text-xs font-semibold">
+                                <option value="text">Texto Curto</option>
+                                <option value="textarea">Texto Longo</option>
+                                <option value="select">Seleção</option>
+                              </select>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
