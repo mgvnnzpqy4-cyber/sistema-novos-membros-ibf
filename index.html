@@ -5737,10 +5737,50 @@
       const [reportType, setReportType] = useState('geral');
       const [filterInt, setFilterInt] = useState('todos');
       const [candidateAiSummaries, setCandidateAiSummaries] = useState({});
-      const [generatingProgress, setGeneratingProgress] = useState(0);
-      const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+      const [reportsSubTab, setReportsSubTab] = useState('completo');
 
-      const apiKey = "AQ.Ab8RN6I6ftoWqNTl6r96xyn0W7IQlB3SqwjOLkR7b11BFxDHJw"; // Sua chave de API Gemini integrada
+      const generateSyntheticCandidateSummary = async (candId, candAnswers, candEval, candInterviewAnswers) => {
+        if (candidateAiSummaries[candId]) return;
+        try {
+          let text = "";
+          try {
+            const apiRes = await fetch('/api/summarize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ answers: candAnswers, evaluation: candEval, interviewAnswers: candInterviewAnswers })
+            });
+            if (apiRes.ok) {
+              const apiJson = await apiRes.json();
+              if (apiJson && apiJson.summary) {
+                text = apiJson.summary;
+              }
+            }
+          } catch (serverErr) {
+            // Ignora e faz fallback direto via Gemini API
+          }
+
+          if (!text) {
+            const promptText = `Escreva um resumo sintético da entrevista do candidato fundamentando-se APENAS nos dados da entrevista realizada. O resumo deve ser ultra-curto, menor que 2 linhas de texto corrido. ATENÇÃO: NÃO inclua datas, horários, telefones, e-mails ou contatos pessoais. Dados da entrevista: ${JSON.stringify(candInterviewAnswers || {})}. Parecer: ${candEval}.`;
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+            });
+            const result = await response.json();
+            text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          }
+
+          if (!text) {
+            text = "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
+          }
+
+          setCandidateAiSummaries(prev => ({ ...prev, [candId]: text.trim() }));
+        } catch (e) {
+          setCandidateAiSummaries(prev => ({ ...prev, [candId]: "Candidato demonstrou excelente vivência cristã e firme disposição para servir." }));
+        }
+      };
 
       const filteredList = useMemo(() => {
         let list = candidates || [];
@@ -5754,74 +5794,15 @@
           list = list.filter(c => (c.evaluation || '').startsWith('Aprovado'));
         } else if (reportType === 'reprovados') {
           list = list.filter(c => (c.evaluation || '').startsWith('Reprovado'));
-        } else if (reportType === 'lista_aprovados') {
-          list = list.filter(c => (c.evaluation || '').startsWith('Aprovado'));
         }
         return list;
       }, [candidates, reportType, filterInt]);
 
-      // Disparador otimizado e seguro contra loops para gerar resumos via Gemini API
-      useEffect(() => {
-        if (filteredList.length === 0 || reportType === 'lista_aprovados') return;
-        
-        const missing = filteredList.filter(c => !candidateAiSummaries[c.id]);
-        if (missing.length === 0) return;
-
-        let isMounted = true;
-        const generateMissing = async () => {
-          setIsGeneratingAll(true);
-          let updatedSummaries = { ...candidateAiSummaries };
-          let totalProcessed = filteredList.length - missing.length;
-
-          for (const cand of missing) {
-            if (!isMounted) break;
-            try {
-              const interviewDataStr = JSON.stringify(cand.interviewAnswers || {});
-              const promptText = `Escreva um resumo sintético ultracurto da entrevista do candidato fundamentando-se APENAS nos dados da entrevista realizada. O resumo deve ter EXATAMENTE menos de 2 linhas de texto corrido. ATENÇÃO EXTREMA: NÃO inclua datas, horários, telefones, e-mails ou contatos pessoais. Dados da entrevista: ${interviewDataStr}. Parecer: ${cand.evaluation}.`;
-              
-              const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-              const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
-              });
-              const result = await response.json();
-              let text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-              if (!text) {
-                text = "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
-              }
-
-              updatedSummaries[cand.id] = text.trim();
-              totalProcessed++;
-              if (isMounted) {
-                setCandidateAiSummaries({ ...updatedSummaries });
-                setGeneratingProgress(Math.round((totalProcessed / filteredList.length) * 100));
-              }
-            } catch (err) {
-              updatedSummaries[cand.id] = "Candidato demonstrou excelente vivência cristã e firme disposição para servir.";
-              totalProcessed++;
-              if (isMounted) {
-                setCandidateAiSummaries({ ...updatedSummaries });
-                setGeneratingProgress(Math.round((totalProcessed / filteredList.length) * 100));
-              }
-            }
-          }
-          if (isMounted) {
-            setIsGeneratingAll(false);
-          }
-        };
-
-        generateMissing();
-        return () => { isMounted = false; };
-      }, [filteredList.map(c => c.id).join(','), reportType]);
-
-      // Verifica se todos os resumos dos candidatos filtrados já foram gerados pela IA (se aplicável)
+      // Verifica se todos os resumos dos candidatos filtrados já foram gerados pela IA
       const areAllSummariesReady = useMemo(() => {
-        if (reportType === 'lista_aprovados') return true;
         if (filteredList.length === 0) return true;
         return filteredList.every(c => candidateAiSummaries[c.id]);
-      }, [filteredList, candidateAiSummaries, reportType]);
+      }, [filteredList, candidateAiSummaries]);
 
       const reportStats = useMemo(() => {
         const total = filteredList.length;
@@ -5829,6 +5810,95 @@
         const reproved = filteredList.filter(c => (c.evaluation || '').startsWith('Reprovado')).length;
         return { total, approved, reproved };
       }, [filteredList]);
+
+      const approvedNumberedList = useMemo(() => {
+        let list = candidates || [];
+        return list.filter(c => c.interviewStatus === 'concluida' && (c.evaluation || '').startsWith('Aprovado'));
+      }, [candidates]);
+
+      const handleDownloadApprovedNamesListPdf = () => {
+        try {
+          if (window.jspdf && window.jspdf.jsPDF) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.setTextColor(15, 23, 42);
+            doc.text('IGREJA BATISTA FILADELFIA', 14, 16);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            doc.setTextColor(15, 23, 42);
+            doc.text('LISTA DE APROVADOS (NOMES E NUMERADA)', 14, 22.5);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.setTextColor(82, 82, 91);
+            doc.text(`Turma: ${activeClass?.name || 'Geral'}    Total: ${approvedNumberedList.length} aprovados`, 14, 28);
+
+            doc.setDrawColor(226, 232, 240);
+            doc.setLineWidth(0.3);
+            doc.line(14, 32, pageWidth - 14, 32);
+
+            const tableRows = approvedNumberedList.map((c, index) => {
+              const name = getCandidateFullName(c);
+              return [`${index + 1}.`, name];
+            });
+
+            doc.autoTable({
+              startY: 38,
+              margin: { left: 14, right: 14, bottom: 20 },
+              head: [['Nº', 'NOME COMPLETO DO APROVADO']],
+              body: tableRows.length > 0 ? tableRows : [['-', 'Nenhum candidato aprovado encontrado.']],
+              theme: 'grid',
+              styles: {
+                font: 'helvetica',
+                fontSize: 9,
+                cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+                textColor: [51, 65, 85],
+                lineColor: [226, 232, 240],
+                lineWidth: 0.2,
+                valign: 'middle'
+              },
+              headStyles: {
+                fillColor: [15, 23, 42],
+                textColor: [255, 255, 255],
+                fontStyle: 'bold',
+                fontSize: 9
+              },
+              alternateRowStyles: {
+                fillColor: [250, 250, 250]
+              },
+              columnStyles: {
+                0: { cellWidth: 15, halign: 'center', fontStyle: 'bold', textColor: [15, 23, 42] },
+                1: { cellWidth: 165, fontStyle: 'bold', textColor: [15, 23, 42] }
+              },
+              didDrawPage: function (data) {
+                const pageNumber = doc.internal.getNumberOfPages();
+                doc.setDrawColor(226, 232, 240);
+                doc.setLineWidth(0.3);
+                doc.line(14, pageHeight - 14, pageWidth - 14, pageHeight - 14);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7);
+                doc.setTextColor(148, 163, 184);
+                doc.text('Igreja Batista Filadélfia Departamento de Membresia', 14, pageHeight - 8);
+                doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}  |  Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
+              }
+            });
+
+            doc.save(`Lista_Aprovados_Numerada_${activeClass?.id || 'turma'}.pdf`);
+          } else {
+            window.print();
+          }
+        } catch (err) {
+          console.error("Erro ao gerar PDF da lista de aprovados:", err);
+          window.print();
+        }
+      };
 
       const handleDownloadPdf = () => {
         if (!areAllSummariesReady) return;
@@ -5864,8 +5934,7 @@
               doc.setFont('helvetica', 'bold');
               doc.setFontSize(11);
               doc.setTextColor(15, 23, 42);
-              const reportTitle = reportType === 'lista_aprovados' ? 'LISTA OFICIAL DE APROVADOS' : 'RELATÓRIO DE ENTREVISTAS CONCLUÍDAS';
-              doc.text(reportTitle, 58, 14);
+              doc.text('RELATÓRIO DE ENTREVISTAS CONCLUÍDAS', 58, 14);
 
               const selectedIntObj = interviewers.find(i => i.id === filterInt);
               const intLabel = selectedIntObj ? selectedIntObj.name : 'Todos os Entrevistadores';
@@ -5879,142 +5948,92 @@
               doc.setLineWidth(0.3);
               doc.line(14, 26, pageWidth - 14, 26);
 
-              if (reportType === 'lista_aprovados') {
-                // 3B. TABELA COM NUMERAÇÃO E NOMES COMPLETOS DOS APROVADOS
-                const tableRows = filteredList.map((c, index) => {
-                  const name = getCandidateFullName(c);
-                  return [`${index + 1}.`, name];
-                });
+              // 2. BLOCOS DE CARDS DE RESUMO (KPIs EXECUTIVOS)
+              const cardY = 30;
+              const cardW = (pageWidth - 28 - 8) / 3;
+              const cardH = 15;
 
-                doc.autoTable({
-                  startY: 34,
-                  margin: { left: 14, right: 14, bottom: 20 },
-                  head: [['Nº', 'NOME COMPLETO DO APROVADO']],
-                  body: tableRows.length > 0 ? tableRows : [['-', 'Nenhum candidato aprovado encontrado.']],
-                  theme: 'grid',
-                  styles: {
-                    font: 'helvetica',
-                    fontSize: 9,
-                    cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
-                    textColor: [15, 23, 42],
-                    lineColor: [226, 232, 240],
-                    lineWidth: 0.2,
-                    valign: 'middle',
-                    halign: 'left'
-                  },
-                  headStyles: {
-                    fillColor: [15, 23, 42],
-                    textColor: [255, 255, 255],
-                    fontStyle: 'bold',
-                    fontSize: 9,
-                    halign: 'left'
-                  },
-                  alternateRowStyles: {
-                    fillColor: [250, 250, 250]
-                  },
-                  columnStyles: {
-                    0: { cellWidth: 15, fontStyle: 'bold', textColor: [100, 116, 139], halign: 'center' },
-                    1: { cellWidth: pageWidth - 43, fontStyle: 'bold', textColor: [15, 23, 42], halign: 'left' }
-                  },
-                  didDrawPage: function (data) {
-                    const pageNumber = doc.internal.getNumberOfPages();
-                    doc.setDrawColor(226, 232, 240);
-                    doc.setLineWidth(0.3);
-                    doc.line(14, pageHeight - 14, pageWidth - 14, pageHeight - 14);
+              const cardsData = [
+                { label: 'CONCLUÍDAS', val: String(reportStats.total) },
+                { label: 'APROVADOS', val: String(reportStats.approved) },
+                { label: 'REPROVADOS', val: String(reportStats.reproved) }
+              ];
 
-                    doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(7);
-                    doc.setTextColor(148, 163, 184);
-                    doc.text('Igreja Batista Filadélfia Departamento de Membresia', 14, pageHeight - 8);
-                    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}  |  Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
-                  }
-                });
-              } else {
-                // 2. BLOCOS DE CARDS DE RESUMO (KPIs EXECUTIVOS)
-                const cardY = 30;
-                const cardW = (pageWidth - 28 - 8) / 3;
-                const cardH = 15;
+              cardsData.forEach((card, idx) => {
+                const xPos = 14 + idx * (cardW + 4);
+                doc.setFillColor(248, 250, 252);
+                doc.setDrawColor(226, 232, 240);
+                doc.setLineWidth(0.3);
+                doc.roundedRect(xPos, cardY, cardW, cardH, 1.5, 1.5, 'FD');
 
-                const cardsData = [
-                  { label: 'CONCLUÍDAS', val: String(reportStats.total) },
-                  { label: 'APROVADOS', val: String(reportStats.approved) },
-                  { label: 'REPROVADOS', val: String(reportStats.reproved) }
-                ];
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(6);
+                doc.setTextColor(100, 116, 139);
+                doc.text(card.label, xPos + 5, cardY + 5);
 
-                cardsData.forEach((card, idx) => {
-                  const xPos = 14 + idx * (cardW + 4);
-                  doc.setFillColor(248, 250, 252);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(11);
+                doc.setTextColor(15, 23, 42);
+                doc.text(card.val, xPos + 5, cardY + 12);
+              });
+
+              // 3. TABELA DE DADOS COM ORDEM EXATA: CANDIDATO (NOME COMPLETO), ENTREVISTADOR, RESUMO, STATUS
+              const tableRows = filteredList.map((c, index) => {
+                const name = getCandidateFullName(c);
+                const status = c.evaluation || 'Concluída';
+                const intObj = interviewers.find(i => i.id === c.interviewerId);
+                const intName = intObj ? intObj.name : 'Não atribuído';
+                const synthSummary = candidateAiSummaries[c.id] || 'Candidato demonstrando bom alinhamento ministerial e firmeza na fé.';
+                // Exibe sempre o nome completo enumerado (ex: 1. Nome Completo)
+                const displayCandidateCol = `${index + 1}. ${name}`;
+                return [displayCandidateCol, intName, synthSummary, status];
+              });
+
+              doc.autoTable({
+                startY: 49,
+                margin: { left: 14, right: 14, bottom: 20 },
+                head: [['CANDIDATO', 'ENTREVISTADOR', 'RESUMO', 'STATUS']],
+                body: tableRows.length > 0 ? tableRows : [['Nenhum registro encontrado para este filtro.', '', '', '']],
+                theme: 'grid',
+                styles: {
+                  font: 'helvetica',
+                  fontSize: 7.5,
+                  cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+                  textColor: [51, 65, 85],
+                  lineColor: [226, 232, 240],
+                  lineWidth: 0.2,
+                  valign: 'middle',
+                  halign: 'center'
+                },
+                headStyles: {
+                  fillColor: [15, 23, 42],
+                  textColor: [255, 255, 255],
+                  fontStyle: 'bold',
+                  fontSize: 7.5,
+                  halign: 'center'
+                },
+                alternateRowStyles: {
+                  fillColor: [250, 250, 250]
+                },
+                columnStyles: {
+                  0: { cellWidth: 45, fontStyle: 'bold', textColor: [15, 23, 42], halign: 'center' },
+                  1: { cellWidth: 38, textColor: [71, 85, 105], halign: 'center' },
+                  2: { cellWidth: 69, textColor: [15, 23, 42], halign: 'center' },
+                  3: { cellWidth: 30, textColor: [15, 23, 42], halign: 'center' }
+                },
+                didDrawPage: function (data) {
+                  const pageNumber = doc.internal.getNumberOfPages();
                   doc.setDrawColor(226, 232, 240);
                   doc.setLineWidth(0.3);
-                  doc.roundedRect(xPos, cardY, cardW, cardH, 1.5, 1.5, 'FD');
+                  doc.line(14, pageHeight - 14, pageWidth - 14, pageHeight - 14);
 
-                  doc.setFont('helvetica', 'bold');
-                  doc.setFontSize(6);
-                  doc.setTextColor(100, 116, 139);
-                  doc.text(card.label, xPos + 5, cardY + 5);
-
-                  doc.setFont('helvetica', 'bold');
-                  doc.setFontSize(11);
-                  doc.setTextColor(15, 23, 42);
-                  doc.text(card.val, xPos + 5, cardY + 12);
-                });
-
-                // 3. TABELA DE DADOS COM NOME COMPLETO PURO (SEM NÚMEROS)
-                const tableRows = filteredList.map((c) => {
-                  const name = getCandidateFullName(c);
-                  const status = c.evaluation || 'Concluída';
-                  const intObj = interviewers.find(i => i.id === c.interviewerId);
-                  const intName = intObj ? intObj.name : 'Não atribuído';
-                  const synthSummary = candidateAiSummaries[c.id] || 'Candidato demonstrando bom alinhamento ministerial e firmeza na fé.';
-                  return [name, intName, synthSummary, status];
-                });
-
-                doc.autoTable({
-                  startY: 49,
-                  margin: { left: 14, right: 14, bottom: 20 },
-                  head: [['CANDIDATO', 'ENTREVISTADOR', 'RESUMO', 'STATUS']],
-                  body: tableRows.length > 0 ? tableRows : [['Nenhum registro encontrado para este filtro.', '', '', '']],
-                  theme: 'grid',
-                  styles: {
-                    font: 'helvetica',
-                    fontSize: 7.5,
-                    cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
-                    textColor: [51, 65, 85],
-                    lineColor: [226, 232, 240],
-                    lineWidth: 0.2,
-                    valign: 'middle',
-                    halign: 'center'
-                  },
-                  headStyles: {
-                    fillColor: [15, 23, 42],
-                    textColor: [255, 255, 255],
-                    fontStyle: 'bold',
-                    fontSize: 7.5,
-                    halign: 'center'
-                  },
-                  alternateRowStyles: {
-                    fillColor: [250, 250, 250]
-                  },
-                  columnStyles: {
-                    0: { cellWidth: 45, fontStyle: 'bold', textColor: [15, 23, 42], halign: 'center' },
-                    1: { cellWidth: 38, textColor: [71, 85, 105], halign: 'center' },
-                    2: { cellWidth: 69, textColor: [15, 23, 42], halign: 'center' },
-                    3: { cellWidth: 30, textColor: [15, 23, 42], halign: 'center' }
-                  },
-                  didDrawPage: function (data) {
-                    const pageNumber = doc.internal.getNumberOfPages();
-                    doc.setDrawColor(226, 232, 240);
-                    doc.setLineWidth(0.3);
-                    doc.line(14, pageHeight - 14, pageWidth - 14, pageHeight - 14);
-
-                    doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(7);
-                    doc.setTextColor(148, 163, 184);
-                    doc.text('Igreja Batista Filadélfia Departamento de Membresia', 14, pageHeight - 8);
-                    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}  |  Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
-                  }
-                });
-              }
+                  doc.setFont('helvetica', 'normal');
+                  doc.setFontSize(7);
+                  doc.setTextColor(148, 163, 184);
+                  doc.text('Igreja Batista Filadélfia Departamento de Membresia', 14, pageHeight - 8);
+                  doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}  |  Página ${data.pageNumber} de ${pageNumber}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
+                }
+              });
 
               doc.save(`Relatorio_Executivo_Entrevistas_${reportType}_${activeClass?.id || 'turma'}.pdf`);
             };
@@ -6047,100 +6066,107 @@
 
       return (
         <div id="printable-report" className="space-y-6">
-          {/* HEADER PRINCIPAL DA PÁGINA COM DESIGN REORGANIZADO */}
+          {/* HEADER PRINCIPAL DA PÁGINA COM SUB-ABAS */}
           <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-5">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-zinc-200 pb-5">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 block">Painel Executivo de Relatórios de Entrevistas</span>
                 <h2 className="text-xl font-bold text-zinc-950 mt-0.5">{activeClass?.name}</h2>
-                <p className="text-xs text-zinc-500 mt-0.5">Exibindo somente entrevistas concluídas, com resumos sintéticos ultracurtos gerados via Gemini API.</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Visualize e baixe relatórios completos ou listas nominais numeradas de aprovados.</p>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-center gap-3">
-                {isGeneratingAll && reportType !== 'lista_aprovados' && (
-                  <div className="w-48 bg-zinc-100 rounded-full h-3 overflow-hidden border border-zinc-200 p-0.5" title={`Gerando resumos: ${generatingProgress}%`}>
-                    <div className="bg-emerald-600 h-full rounded-full transition-all duration-300" style={{ width: `${generatingProgress}%` }} />
-                  </div>
-                )}
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  disabled={!areAllSummariesReady}
-                  onClick={handleDownloadPdf}
-                  className={`px-5 py-3 text-xs font-bold rounded-xl transition flex items-center gap-2.5 shadow-sm ${
-                    areAllSummariesReady 
-                      ? 'bg-zinc-900 hover:bg-zinc-800 text-white cursor-pointer' 
-                      : 'bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                  onClick={() => setReportsSubTab('completo')}
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
+                    reportsSubTab === 'completo' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
                   }`}
-                  title={areAllSummariesReady ? "Baixar relatório em PDF" : `Gerando resumos da IA (${generatingProgress}%)...`}
                 >
-                  <Icon name="file-text" className="w-4 h-4" />
-                  <span>{areAllSummariesReady ? 'Baixar Relatório em PDF' : `Gerando Resumos (${generatingProgress}%)...`}</span>
+                  Relatório Completo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportsSubTab('aprovadosNumerada')}
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer ${
+                    reportsSubTab === 'aprovadosNumerada' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+                  }`}
+                >
+                  Lista de Aprovados (Enumerada)
                 </button>
               </div>
             </div>
 
-            {/* SEÇÃO DE FILTROS ORGANIZADA EM GRID EXECUTIVA */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-zinc-700">Filtrar por Tipo de Relatório / Resultado</label>
-                <select
-                  value={reportType}
-                  onChange={(e) => setReportType(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-900"
-                >
-                  <option value="geral">Geral (Todas as Concluídas)</option>
-                  <option value="aprovados">Somente Aprovados (Com Resumos)</option>
-                  <option value="lista_aprovados">Lista Numerada de Nomes dos Aprovados</option>
-                  <option value="reprovados">Somente Reprovados</option>
-                </select>
-              </div>
+            {reportsSubTab === 'completo' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    disabled={!areAllSummariesReady}
+                    onClick={handleDownloadPdf}
+                    className={`px-5 py-3 text-xs font-bold rounded-xl transition flex items-center gap-2.5 shadow-sm ${
+                      areAllSummariesReady 
+                        ? 'bg-zinc-900 hover:bg-zinc-800 text-white cursor-pointer' 
+                        : 'bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                    }`}
+                    title={areAllSummariesReady ? "Baixar relatório em PDF" : "Aguarde a IA gerar todos os resumos sintéticos..."}
+                  >
+                    <Icon name="file-text" className="w-4 h-4" />
+                    <span>{areAllSummariesReady ? 'Baixar Relatório em PDF' : 'Gerando Resumos da IA...'}</span>
+                  </button>
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-zinc-700">Filtrar por Entrevistador Responsável</label>
-                <select
-                  value={filterInt}
-                  onChange={(e) => setFilterInt(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-900"
-                >
-                  <option value="todos">Todos os Entrevistadores</option>
-                  {interviewers.map(i => (
-                    <option key={i.id} value={i.id}>{i.name}</option>
-                  ))}
-                </select>
+                {/* SEÇÃO DE FILTROS ORGANIZADA EM GRID EXECUTIVA */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-zinc-700">Filtrar por Resultado da Entrevista</label>
+                    <select
+                      value={reportType}
+                      onChange={(e) => setReportType(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                    >
+                      <option value="geral">Geral (Todas as Concluídas)</option>
+                      <option value="aprovados">Somente Aprovados</option>
+                      <option value="reprovados">Somente Reprovados</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-zinc-700">Filtrar por Entrevistador Responsável</label>
+                    <select
+                      value={filterInt}
+                      onChange={(e) => setFilterInt(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                    >
+                      <option value="todos">Todos os Entrevistadores</option>
+                      {interviewers.map(i => (
+                        <option key={i.id} value={i.id}>{i.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* CARDS DE RESUMO ESTATÍSTICO (KPIs) */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Total Concluídas</span>
-              <span className="text-3xl font-extrabold text-zinc-950 block">{reportStats.total}</span>
-            </div>
-            <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600">Aprovados</span>
-              <span className="text-3xl font-extrabold text-emerald-700 block">{reportStats.approved}</span>
-            </div>
-            <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-red-600">Reprovados</span>
-              <span className="text-3xl font-extrabold text-red-600 block">{reportStats.reproved}</span>
-            </div>
-          </div>
-
-          {/* TABELA DE REGISTROS CONSOLIDADOS COM NOME COMPLETO E NUMERAÇÃO */}
-          <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
-              <div>
-                <h3 className="font-bold base text-zinc-950">
-                  {reportType === 'lista_aprovados' ? 'Lista Oficial Numerada de Aprovados' : 'Entrevistas Concluídas'}
-                </h3>
-                <p className="text-xs text-zinc-500">Listagem detalhada de entrevistas finalizadas com alinhamento centralizado em cada célula.</p>
+          {reportsSubTab === 'aprovadosNumerada' ? (
+            <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-200 pb-4 gap-3">
+                <div>
+                  <h3 className="font-bold text-base text-zinc-950">Lista de Aprovados (Apenas Nomes e Enumerada)</h3>
+                  <p className="text-xs text-zinc-500">Relação oficial contendo apenas o nome completo dos candidatos aprovados em ordem numérica.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownloadApprovedNamesListPdf}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer shrink-0"
+                >
+                  <Icon name="download" className="w-4 h-4" />
+                  <span>Baixar Lista de Aprovados (PDF)</span>
+                </button>
               </div>
-              <span className="text-xs font-bold bg-zinc-100 text-zinc-800 px-3 py-1 rounded-full">{filteredList.length} itens</span>
-            </div>
 
-            <div className="overflow-x-auto">
-              {reportType === 'lista_aprovados' ? (
+              <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-sm">
                   <thead>
                     <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
@@ -6149,78 +6175,109 @@
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
-                    {filteredList.length === 0 ? (
+                    {approvedNumberedList.length === 0 ? (
                       <tr>
-                        <td colSpan={2} className="p-8 text-center text-zinc-500 text-xs">Nenhum candidato aprovado encontrado.</td>
+                        <td colSpan={2} className="p-8 text-center text-zinc-500 text-xs">Nenhum candidato aprovado encontrado nesta turma.</td>
                       </tr>
                     ) : (
-                      filteredList.map((c, idx) => {
+                      approvedNumberedList.map((c, index) => {
                         const name = getCandidateFullName(c);
                         return (
                           <tr key={c.id} className="hover:bg-zinc-50/80">
-                            <td className="p-4 text-center font-bold text-zinc-500">
-                              {idx + 1}.
-                            </td>
-                            <td className="p-4 font-bold text-zinc-950">
-                              {name}
-                            </td>
+                            <td className="p-4 text-center font-bold text-zinc-500 text-xs">{index + 1}.</td>
+                            <td className="p-4 font-semibold text-zinc-950 text-sm">{name}</td>
                           </tr>
                         );
                       })
                     )}
                   </tbody>
                 </table>
-              ) : (
-                <table className="w-full text-center border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                      <th className="p-4 text-center align-middle">Candidato</th>
-                      <th className="p-4 text-center align-middle">Entrevistador</th>
-                      <th className="p-4 text-center align-middle">Resumo (IA)</th>
-                      <th className="p-4 text-center align-middle">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-200">
-                    {filteredList.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="p-8 text-center text-zinc-500 text-xs">Nenhuma entrevista concluída encontrada para este filtro.</td>
-                      </tr>
-                    ) : (
-                      filteredList.map((c) => {
-                        const name = getCandidateFullName(c);
-                        const status = c.evaluation || 'Concluída';
-                        const intObj = interviewers.find(i => i.id === c.interviewerId);
-                        const intName = intObj ? intObj.name : 'Não atribuído';
-                        const synthSummary = candidateAiSummaries[c.id];
-
-                        return (
-                          <tr key={c.id} className="hover:bg-zinc-50/80">
-                            <td className="p-4 text-center align-middle font-semibold text-zinc-950">
-                              {name}
-                            </td>
-                            <td className="p-4 text-center align-middle text-xs font-semibold text-zinc-700">
-                              {intName}
-                            </td>
-                            <td className="p-4 text-center align-middle">
-                              <div className="inline-flex items-start justify-center gap-1.5 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-xl max-w-sm mx-auto text-left shadow-2xs">
-                                <Icon name="sparkles" className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                                <span className="font-medium italic leading-relaxed">{synthSummary || 'Gerando resumo sintético via IA...'}</span>
-                              </div>
-                            </td>
-                            <td className="p-4 text-center align-middle">
-                              <div className="flex justify-center">
-                                <span className={getEvaluationBadgeClass(status)}>{status}</span>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* CARDS DE RESUMO ESTATÍSTICO (KPIs) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Total Concluídas</span>
+                  <span className="text-3xl font-extrabold text-zinc-950 block">{reportStats.total}</span>
+                </div>
+                <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600">Aprovados</span>
+                  <span className="text-3xl font-extrabold text-emerald-700 block">{reportStats.approved}</span>
+                </div>
+                <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-red-600">Reprovados</span>
+                  <span className="text-3xl font-extrabold text-red-600 block">{reportStats.reproved}</span>
+                </div>
+              </div>
+
+              {/* TABELA DE REGISTROS CONSOLIDADOS COM NOME COMPLETO */}
+              <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-200 pb-3">
+                  <div>
+                    <h3 className="font-bold base text-zinc-950">Entrevistas Concluídas</h3>
+                    <p className="text-xs text-zinc-500">Listagem detalhada de entrevistas finalizadas com alinhamento centralizado em cada célula.</p>
+                  </div>
+                  <span className="text-xs font-bold bg-zinc-100 text-zinc-800 px-3 py-1 rounded-full">{filteredList.length} concluídas</span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-center border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                        <th className="p-4 text-center align-middle">Candidato</th>
+                        <th className="p-4 text-center align-middle">Entrevistador</th>
+                        <th className="p-4 text-center align-middle">Resumo (IA)</th>
+                        <th className="p-4 text-center align-middle">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-200">
+                      {filteredList.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="p-8 text-center text-zinc-500 text-xs">Nenhuma entrevista concluída encontrada para este filtro.</td>
+                        </tr>
+                      ) : (
+                        filteredList.map(c => {
+                          const name = getCandidateFullName(c);
+                          const status = c.evaluation || 'Concluída';
+                          const intObj = interviewers.find(i => i.id === c.interviewerId);
+                          const intName = intObj ? intObj.name : 'Não atribuído';
+                          const synthSummary = candidateAiSummaries[c.id];
+
+                          if (!synthSummary) {
+                            generateSyntheticCandidateSummary(c.id, c.answers, status, c.interviewAnswers);
+                          }
+
+                          return (
+                            <tr key={c.id} className="hover:bg-zinc-50/80">
+                              <td className="p-4 text-center align-middle font-semibold text-zinc-950">
+                                {name}
+                              </td>
+                              <td className="p-4 text-center align-middle text-xs font-semibold text-zinc-700">
+                                {intName}
+                              </td>
+                              <td className="p-4 text-center align-middle">
+                                <div className="inline-flex items-start justify-center gap-1.5 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-2 rounded-xl max-w-sm mx-auto text-left shadow-2xs">
+                                  <Icon name="sparkles" className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                                  <span className="font-medium italic leading-relaxed">{synthSummary || 'Gerando resumo sintético...'}</span>
+                                </div>
+                              </td>
+                              <td className="p-4 text-center align-middle">
+                                <div className="flex justify-center">
+                                  <span className={getEvaluationBadgeClass(status)}>{status}</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       );
     }
